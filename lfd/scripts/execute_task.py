@@ -52,8 +52,8 @@ import yaml
 data_dir = osp.join(osp.dirname(lfd.__file__), "data")
 with open(osp.join(data_dir, "knot_demos.yaml"),"r") as fh: 
     task_info = yaml.load(fh)
-    
-DS_LENGTH = .025
+
+DS_LENGTH = .02
 DS_METHOD = "voxel"
 if args.task.startswith("fold"):
     DS_METHOD="hull"
@@ -237,13 +237,17 @@ class SelectTrajectory(smach.State):
         dists_new = recognition.calc_geodesic_distances_downsampled_old(xyz_new,xyz_new_ds, ds_inds)
         
         if args.human_select_demo:
-            raise NotImplementedError
-            seg_name = trajectory_library.interactive_select_demo(demos)
-            best_demo = demos[seg_name]         
-            pts0,_ = best_demo["cloud_xyz_ds"]
-            pts1,_ = downsample(xyz_new)
-            self.f = registration.tps_rpm(pts0, pts1, plotting = 4, reg_init=1,reg_final=args.reg_final,n_iter=40)                            
-        else:            
+            # raise NotImplementedError
+            # seg_name = trajectory_library.interactive_select_demo(demos)
+            # best_demo = demos[seg_name]         
+            # pts0,_ = best_demo["cloud_xyz_ds"]
+            # pts1,_ = downsample(xyz_new)
+            # self.f = registration.tps_rpm(pts0, pts1, plotting = 4, reg_init=1,reg_final=args.reg_final,n_iter=40)                            
+            best_name = None
+            while best_name not in demos:
+                print 'Select demo from', demos.keys()
+                best_name = raw_input('> ')
+        else:
             
             if args.count_steps: candidate_demo_names = self.count2segnames[Globals.stage]
             else: candidate_demo_names = demos.keys()

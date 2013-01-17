@@ -6,6 +6,7 @@ import lfd
 import os
 from lfd import recognition, warping, registration
 import os.path as osp
+import cloud_io
 
 PARALLEL = False
 
@@ -62,7 +63,7 @@ def draw_comparison(left_cloud, right_cloud, show_shape_context=False):
     @on_trait_change('scene2.activated')
     def redraw_scene2(self):
       self.redraw_scene(self.scene2, right_cloud['cloud_xyz'])
-      self.redraw_scene(self.scene2, left_cloud, clear=False)
+      #self.redraw_scene(self.scene2, left_cloud, clear=False)
       if show_shape_context:
         self.draw_shape_context(self.scene2, right_cloud)
 
@@ -95,36 +96,17 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--dataset', default='overhand_knot', help='name of dataset')
   parser.add_argument('--method', choices=['geodesic_dist', 'shape_context', 'geodesic_dist+shape_context'], default='geodesic_dist', help='matching algorithm')
-  parser.add_argument('--input_mode', choices=['from_dataset', 'kinect', 'file'], default='kinect', help='input cloud acquisition method')
-  parser.add_argument('--cloud_topic', default='/preprocessor/kinect1/points', help='ros topic for kinect input mode')
-  parser.add_argument('--input_file', help='input file for --input_mode=file')
+  parser.add_argument('input', type=str)
   parser.add_argument('--show_shape_context', action='store_true')
+  parser.add_argument('--save_input', type=str, default='')
   args = parser.parse_args()
 
   dataset = recognition.DataSet.LoadFromTaskDemos(args.dataset)
 
   # read input to match
-  input_xyz = None
-  if args.input_mode == 'from_dataset':
-    key = select_from_list(sorted(dataset.keys()))
-    input_xyz = np.squeeze(np.asarray(dataset[key]['cloud_xyz']))
-  elif args.input_mode == 'kinect':
-    import rospy
-    from brett2 import ros_utils
-    import sensor_msgs
-    import time
-    if rospy.get_name() == '/unnamed':
-      rospy.init_node('matcher', disable_signals=True)
-    msg = rospy.wait_for_message(args.cloud_topic, sensor_msgs.msg.PointCloud2)
-    xyz, rgb = ros_utils.pc2xyzrgb(msg)
-    xyz = xyz.reshape(-1, 3)
-    tf_listener = ros_utils.get_tf_listener()
-    time.sleep(1) # so tf works
-    input_xyz = ros_utils.transform_points(xyz, tf_listener, "ground", msg.header.frame_id)
-  elif args.input_mode == 'file':
-    input_xyz = np.load(args.input_file)['cloud_xyz']
-  else:
-    raise NotImplementedError
+  input_xyz = cloud_io.read_from_rsrc(args.input)
+  if args.save_input:
+    cloud_io.write_cloud(args.save_input, input_xyz)
 
   # create the matcher
   matcher = None

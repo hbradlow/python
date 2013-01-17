@@ -1,0 +1,10 @@
+<launch>
+  <node name="preprocessor" pkg="binary_symlinks" type="robot_preprocessor_node"  respawn="true" args="--inputTopic=/drop/points --downsample=.015 --removeOutliers=0 --zClipLow=-.01 --clusterTolerance=.025 --clusterMinSize=20" output="screen">
+    <param name="min_hue" value="120" />
+    <param name="max_hue" value="10" />
+    <param name="min_sat" value="100" />
+    <param name="max_sat" value="255" />
+    <param name="min_val" value="80" />
+    <param name="max_val" value="255" />
+  </node>
+</launch>

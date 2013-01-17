@@ -18,7 +18,7 @@ def read_from_dataset(demos_list_file, dataset_name, seg_name):
     seg_name = select_from_list(sorted(dataset.keys()))
   return np.squeeze(np.asarray(dataset[seg_name]['cloud_xyz']))
 
-def read_from_ros(cloud_topic, frame='ground'):
+def read_from_ros(cloud_topic, frame='base_footprint'):
   '''format: ros:/my/topic/points(:frame)'''
   import rospy
   from brett2 import ros_utils
@@ -37,7 +37,7 @@ def read_from_npz(filename):
   return np.load(filename)['cloud_xyz']
 
 def write_cloud(out_file, cloud):
-  np.savez(out_file, cloud_xyz=out_file)
+  np.savez(out_file, cloud_xyz=cloud)
 
 def read_from_rsrc(rsrc):
   parts = rsrc.split(':')

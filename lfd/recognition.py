@@ -118,8 +118,8 @@ def match_and_calc_shape_context(xyz_demo_ds, xyz_new_ds, hists_demo=None, hists
     # (single terms of) chi-squared test statistic
     return 0.5/h1.shape[0] * ((h2 - h1)**2 / (h2 + h1 + 1))
 
-  f = registration.tps_rpm(xyz_demo_ds, xyz_new_ds, plotting=False,reg_init=1,reg_final=.1,n_iter=21, verbose=False)
-  partners = f.corr.argmax(axis=1)
+  f, info = registration.tps_rpm(xyz_demo_ds, xyz_new_ds, plotting=False,reg_init=1,reg_final=.1,n_iter=21, verbose=False, return_full=True)
+  partners = info['corr_nm'].argmax(axis=1)
 
   if hists_demo is None:
     hists_demo = calc_shape_context_hists(xyz_demo_ds)

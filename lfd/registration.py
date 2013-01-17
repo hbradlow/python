@@ -229,7 +229,10 @@ def plot_correspondence(x_nd, y_nd):
     ax.add_collection(lc)
     plt.draw()
 
-def plot_correspondence_3d(x_nd, y_nd):
+def plot_correspondence_3d(x_nd, y_nd, center=True):
+    if center:
+        c = np.mean(x_nd, axis=0)
+        x_nd, y_nd = x_nd - c[None,:], y_nd - c[None,:]
     lines = np.array(zip(x_nd, y_nd))
     from mpl_toolkits import mplot3d
     from mpl_toolkits.mplot3d import art3d
