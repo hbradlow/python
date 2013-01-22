@@ -18,6 +18,7 @@ parser.add_argument("--reg_final", type=float, default=.025)
 parser.add_argument("--use_rigid", action="store_true")
 parser.add_argument("--cloud_topic", type=str, default="/preprocessor/points")
 parser.add_argument("--delay_before_look", type=float, default=-1)
+parser.add_argument("--use_nr", action="store_true", help="use nonrigidy tps")
 args = parser.parse_args()
 
 
@@ -274,8 +275,20 @@ class SelectTrajectory(smach.State):
             self.f = registration.Translation2d()
             self.f.fit(xyz_demo_ds, xyz_new_ds)
         else:
-            self.f = registration.tps_rpm(xyz_demo_ds, xyz_new_ds, plotting = 20, reg_init=1,reg_final=.01,n_iter=n_iter,verbose=False)#, interactive=True)
+            self.f, info = registration.tps_rpm(xyz_demo_ds, xyz_new_ds, plotting = 20, reg_init=1,reg_final=.01,n_iter=n_iter,verbose=False, return_full=True)#, interactive=True)
             np.savez('registration_data', xyz_demo_ds=xyz_demo_ds, xyz_new_ds=xyz_new_ds)
+            if args.use_nr:
+                from lfd import tps
+                import scipy.spatial.distance as ssd
+                pts_grip = []
+                for lr in "lr":
+                  if best_demo["arms_used"] in ["b", lr]:
+                    pts_grip.extend(best_demo["%s_gripper_tool_frame"%lr]["position"])
+                pts_grip = np.array(pts_grip)
+                dist_to_rope = ssd.cdist(pts_grip, xyz_demo_ds).min(axis=1)
+                pts_grip_near_rope = pts_grip[dist_to_rope < .04,:]
+                pts_rigid = voxel_downsample(pts_grip_near_rope, .01)
+                self.f.lin_ag, self.f.trans_g, self.f.w_ng, self.f.x_na = tps.tps_nr_fit_enhanced(info["x_Nd"], info["targ_Nd"], 0.01, pts_rigid, 0.001, method="newton", plotting=5)
             # print 'correspondences', self.f.corr_nm
 
 

@@ -250,6 +250,8 @@ def correct_bag_errors(all_times):
     # First find the segment start/stops. They should come in pairs.
     start_times = [p[0] for p in all_times if p[1] == 'start']
     stop_times = [p[0] for p in all_times if p[1] == 'stop']
+    #stop_times = stop_times[:-1]
+    #all_times.pop( [i for i,x in enumerate(all_times) if x[1] == 'stop'][-1]  )
     assert len(start_times) == len(stop_times)
     segments = zip(start_times, stop_times) # TODO: check that the segments make sense + error recovery
     assert all(a <= b for a, b in segments)

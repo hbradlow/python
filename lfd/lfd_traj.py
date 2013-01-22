@@ -14,6 +14,7 @@ import jds_utils.math_utils as mu
 from jds_utils.math_utils import interp2d
 import traj_ik_graph_search
 import traj_opt
+import openravepy as rave
 
 ALWAYS_FAKE_SUCESS = False
 USE_PLANNING = False

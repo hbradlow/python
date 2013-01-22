@@ -141,7 +141,7 @@ def main():
     ### Parameters ###
     ENV_FILE = "../../trajopt/data/pr2_table.env.xml"
     MANIP_NAME = "rightarm"
-    N_STEPS = 10
+    N_STEPS = 20
     LINK_NAME = "r_gripper_tool_frame"
     INTERACTIVE = True
     #joints_start_end = np.array([
@@ -155,8 +155,10 @@ def main():
     #joints_start_end = np.array([[  -1.83204054  , -0.33201855 ,  -1.01105089 ,  -1.43693186  , -1.099908,   -2.00040616, -116.17133393],
    #[  -0.38176851  ,  0.17886005  , -1.4    ,      -1.89752658 ,  -1.93285873,   -1.60546868, -114.70809047]])
 
-    joints_start_end = np.array([[0.33487707,   -0.50480484 ,  -3.3    ,      -1.33546928  , -1.37194549 ,  -0.14645853 ,-116.11672039],  [  4.71340480e-01 , -4.56593341e-01 , -3.60000000e+00 , -1.33176173e+00,
-   1.21859723e+00 , -9.98780266e-02,  -1.18561732e+02]])
+
+    joints_start_end = np.array([[ -3.86855713e-02 , -5.22510716e-01 , -2.60000000e+00 , -2.04649793e+00,
+  -8.10538216e+00,  -5.84395408e-01,  -1.15484784e+02], [   0.60304244 ,  -0.51775144 ,  -3.7   ,       -2.04380412 , -10.6637022,
+   -0.35987834 ,-112.71520258]])
 
 
     ##################
@@ -175,6 +177,11 @@ def main():
         atexit.register(rave.RaveDestroy)
         env.Load(ENV_FILE)
     robot = env.GetRobots()[0]
+
+    SIDE_POSTURE =  [  1.832,  -0.332,   1.011,  -1.437,   1.1  ,  -2.106,  3.074]
+    robot.SetDOFValues(SIDE_POSTURE, robot.GetManipulator('leftarm').GetArmIndices())
+    robot.SetDOFValues(SIDE_POSTURE, robot.GetManipulator('rightarm').GetArmIndices())
+
     manip = robot.GetManipulator(MANIP_NAME)
     robot.SetDOFValues(joints_start, manip.GetArmIndices())
     ##################
