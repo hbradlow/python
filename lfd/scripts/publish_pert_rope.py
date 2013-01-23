@@ -18,7 +18,7 @@ parser.add_argument("--task")
 parser.add_argument("--seg", default=None)
 parser.add_argument('--s', action='store', type=float, default=0.001, help='variance of randomness to introduce to the b-spline control points')
 parser.add_argument('--n', action='store', type=int, default=1, help='num samples to draw')
-parser.add_argument('--const_radius', action='store_true', help='don\'t use gaussian around each control point with variance s (just use a random angle, with constant radius sqrt(s)')
+parser.add_argument('--const_radius', type=bool, default=True, help='don\'t use gaussian around each control point with variance s (just use a random angle, with constant radius sqrt(s)')
 args = parser.parse_args()
 
 def select_from_list(list):
