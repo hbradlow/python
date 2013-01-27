@@ -128,6 +128,92 @@ def move_arm_cart(env, manip, link_name, xyzs, quats, init_soln, interactive=Fal
     return result.GetTraj()
 
 
+def move_arms_base_request(manips, init_soln, left_xyzs, left_quats, left_init_traj, right_xyzs, right_quats, right_init_traj):
+    has_left = left_xyzs is not None
+    has_right = right_xyzs is not None
+    assert has_left or has_right
+    n_steps = len(left_xyzs) if has_left else len(right_xyzs)
+
+    arm_dofs = 14 if has_left and has_right else 7
+
+    request = {
+        'basic_info': {
+          'n_steps': n_steps,
+          'manip': '+'.join(manips), #leftarm+rightarm+torso_lift_joint+base',
+          'start_fixed': False,
+        },
+        'costs': [
+            { 'type': 'joint_vel', 'params': { 'coeffs': np.r_[np.ones(arm_dofs + 1), 10*np.ones(3)].tolist() } },
+            { 'type': 'collision', 'params': { 'coeffs': [1], 'dist_pen': [0.025] } },
+        ],
+        'constraints': [],
+        'init_info': {
+            'type': 'given_traj',
+            'data': [j.tolist() for j in init_soln],
+        },
+    }
+    for i in range(n_steps):
+        if has_left:
+            request['constraints'].append({
+                'type': 'pose',
+                'name': 'waypoint_pose_l_%d' % i,
+                'params': {
+                    'xyz': list(left_xyzs[i]),
+                    'wxyz': list(left_quats[i]),
+                    'link': 'l_gripper_tool_frame',
+                    'timestep': i,
+                }
+            })
+        if has_right:
+            request['constraints'].append({
+                'type': 'pose',
+                'name': 'waypoint_pose_r_%d' % i,
+                'params': {
+                    'xyz': list(right_xyzs[i]),
+                    'wxyz': list(right_quats[i]),
+                    'link': 'r_gripper_tool_frame',
+                    'timestep': i,
+                }
+            })
+    return request
+
+def move_arms_base(env, left_xyzs, left_quats, left_init_traj, right_xyzs, right_quats, right_init_traj, interactive=False):
+    has_left = left_xyzs is not None
+    has_right = right_xyzs is not None
+    assert has_left or has_right
+    n_steps = len(left_xyzs) if has_left else len(right_xyzs)
+
+    assert not has_left or len(left_xyzs) == len(left_quats) == n_steps
+    assert not has_right or len(right_xyzs) == len(right_quats) == n_steps
+
+    manips = []
+    if has_left: manips.append('leftarm')
+    if has_right: manips.append('rightarm')
+    manips += ['torso_lift_joint', 'base']
+
+    if has_left and has_right: init_soln = np.c_[left_init_traj, right_init_traj]
+    elif has_left: init_soln = left_init_traj
+    else: init_soln = right_init_traj
+    init_soln = np.c_[init_soln, np.tile([0, 0, 0, 0], (n_steps, 1))]
+
+    request = move_arms_base_request(manips, init_soln, left_xyzs, left_quats, left_init_traj, right_xyzs, right_quats, right_init_traj)
+    trajoptpy.SetInteractive(interactive)
+    prob = trajoptpy.ConstructProblem(json.dumps(request), env)
+    result = trajoptpy.OptimizeProblem(prob)
+    traj = result.GetTraj()
+
+    out = {}
+    if has_left and has_right:
+        out['leftarm'], out['rightarm'] = traj[:,:7], traj[:,7:14]
+        out['torso_lift_joint'] = traj[:,14]
+        out['base'] = traj[:,15:]
+    else:
+        out['leftarm' if has_left else 'rightarm'] = traj[:,:7]
+        out['torso_lift_joint'] = traj[:,7]
+        out['base'] = traj[:,8:]
+    return out
+
+
 def play_traj(traj, env, manip):
     robot = manip.GetRobot()
     with env:
@@ -137,7 +223,6 @@ def play_traj(traj, env, manip):
             raw_input('.')
 
 def main():
-        
     ### Parameters ###
     ENV_FILE = "../../trajopt/data/pr2_table.env.xml"
     MANIP_NAME = "rightarm"
@@ -167,8 +252,8 @@ def main():
     joints_start_end[:,6] = np.unwrap(joints_start_end[:,6])
     joints_start = joints_start_end[0,:]
     joints_end = joints_start_end[1,:]
-    
-    
+
+
     ### Env setup ####
     env = rave.RaveGetEnvironment(1)
     if env is None:

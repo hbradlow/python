@@ -19,6 +19,8 @@ parser.add_argument("--use_rigid", action="store_true")
 parser.add_argument("--cloud_topic", type=str, default="/preprocessor/points")
 parser.add_argument("--delay_before_look", type=float, default=-1)
 parser.add_argument("--use_nr", action="store_true", help="use nonrigidy tps")
+parser.add_argument("--log_name", type=str, default="/tmp")
+parser.add_argument("--use_base", action="store_true")
 args = parser.parse_args()
 
 import roslib; roslib.load_manifest("smach_ros")
@@ -29,6 +31,7 @@ from kinematics import kinbodies
 from jds_utils.yes_or_no import yes_or_no
 import sensor_msgs.msg
 import geometry_msgs.msg as gm
+import trajectory_msgs.msg as tm
 import rospy
 import os
 import os.path as osp
@@ -37,6 +40,7 @@ from brett2.ros_utils import Marker
 import numpy as np
 from jds_utils import conversions
 from jds_image_proc.clouds import voxel_downsample
+import jds_utils.math_utils as mu
 try:
     from jds_image_proc.alpha_shapes import get_concave_hull
 except Exception:
@@ -56,8 +60,16 @@ import atexit
 class ExecLog(object):
     def __init__(self):
         self.name = str(np.random.randint(9999999999))
-        self.filename = '/tmp/execute_task_%d_%s_%s.log' % (os.getpid(), datetime.datetime.now().isoformat(), self.name)
         self.events = []
+
+        dirname = osp.join(osp.dirname(lfd.__file__), 'data', 'logs', args.log_name)
+        if not osp.exists(dirname):
+            rospy.loginfo('Creating log directory %s', dirname)
+            os.makedirs(dirname)
+        self.filename = osp.join(
+            dirname,
+            'execute_task_%d_%s_%s.log' % (os.getpid(), datetime.datetime.now().isoformat(), self.name)
+        )
         rospy.loginfo('Will write event log to %s', self.filename)
 
     def log(self, state, msg, data):
@@ -74,8 +86,8 @@ class ExecLog(object):
             return
         with open(self.filename, 'w') as f:
             pickle.dump(self.events, f, protocol=2)
+        rospy.loginfo('Wrote %d events to %s', len(self.events), self.filename)
         self.events = []
-        rospy.loginfo('Wrote event log to %s', self.filename)
 
 ELOG = ExecLog()
 atexit.register(ELOG.dump)
@@ -239,9 +251,9 @@ class SelectTrajectory(smach.State):
     f = None
     def __init__(self):
         smach.State.__init__(self,
-            outcomes = ["done", "not_done","failure"],
+            outcomes = ["done", "not_done","failure", "move_base"],
             input_keys = ["points"],
-            output_keys = ["trajectory"])
+            output_keys = ["trajectory", "base_offset"])
 
         rospy.loginfo("preprocessing demo point clouds...")
         for (_,demo) in demos.items():
@@ -272,30 +284,24 @@ class SelectTrajectory(smach.State):
         ELOG.log('SelectTrajectory', 'xyz_new_ds', xyz_new_ds)
         ELOG.log('SelectTrajectory', 'dists_new', dists_new)
 
+        if args.count_steps: candidate_demo_names = self.count2segnames[Globals.stage]
+        else: candidate_demo_names = demos.keys()
+
+        from joblib import parallel
+
+        costs_names = parallel.Parallel(n_jobs=-2)(parallel.delayed(calc_seg_cost)(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names)
+        #costs_names = [calc_seg_cost(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names]
+        #costs_names = [calc_seg_cost(seg_name) for seg_name in candidate_demo_names]
+
+        ELOG.log('SelectTrajectory', 'costs_names', costs_names)
+        _, best_name = min(costs_names)
+
         if args.human_select_demo:
-            # raise NotImplementedError
-            # seg_name = trajectory_library.interactive_select_demo(demos)
-            # best_demo = demos[seg_name]
-            # pts0,_ = best_demo["cloud_xyz_ds"]
-            # pts1,_ = downsample(xyz_new)
-            # self.f = registration.tps_rpm(pts0, pts1, plotting = 4, reg_init=1,reg_final=args.reg_final,n_iter=40)
+            print 'Calculated best demo:', best_name
             best_name = None
             while best_name not in demos:
                 print 'Select demo from', demos.keys()
                 best_name = raw_input('> ')
-        else:
-
-            if args.count_steps: candidate_demo_names = self.count2segnames[Globals.stage]
-            else: candidate_demo_names = demos.keys()
-
-            from joblib import parallel
-
-            costs_names = parallel.Parallel(n_jobs=-2)(parallel.delayed(calc_seg_cost)(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names)
-            #costs_names = [calc_seg_cost(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names]
-            #costs_names = [calc_seg_cost(seg_name) for seg_name in candidate_demo_names]
-
-            ELOG.log('SelectTrajectory', 'costs_names', costs_names)
-            _, best_name = min(costs_names)
 
         ELOG.log('SelectTrajectory', 'best_name', best_name)
         best_demo = demos[best_name]
@@ -313,10 +319,13 @@ class SelectTrajectory(smach.State):
         if args.use_rigid:
             self.f = registration.Translation2d()
             self.f.fit(xyz_demo_ds, xyz_new_ds)
+            ELOG.log('SelectTrajectory', 'f', self.f)
         else:
             self.f, info = registration.tps_rpm(xyz_demo_ds, xyz_new_ds, plotting = 20, reg_init=1,reg_final=.01,n_iter=n_iter,verbose=False, return_full=True)#, interactive=True)
-            np.savez('registration_data', xyz_demo_ds=xyz_demo_ds, xyz_new_ds=xyz_new_ds)
+            ELOG.log('SelectTrajectory', 'f', self.f)
+            ELOG.log('SelectTrajectory', 'f_info', info)
             if args.use_nr:
+                rospy.loginfo('Using nonrigidity costs')
                 from lfd import tps
                 import scipy.spatial.distance as ssd
                 pts_grip = []
@@ -329,7 +338,6 @@ class SelectTrajectory(smach.State):
                 pts_rigid = voxel_downsample(pts_grip_near_rope, .01)
                 self.f.lin_ag, self.f.trans_g, self.f.w_ng, self.f.x_na = tps.tps_nr_fit_enhanced(info["x_Nd"], info["targ_Nd"], 0.01, pts_rigid, 0.001, method="newton", plotting=5)
             # print 'correspondences', self.f.corr_nm
-        ELOG.log('SelectTrajectory', 'f', self.f)
 
 
         #################### Generate new trajectory ##################
@@ -350,36 +358,107 @@ class SelectTrajectory(smach.State):
 
         #### Actually generate the trajectory ###########
         warped_demo = warping.transform_demo_with_fingertips(self.f, best_demo)
-        if yes_or_no('dump warped demo?'):
-            import pickle
-            fname = '/tmp/warped_demo_' + str(np.random.randint(9999999999)) + '.pkl'
-            with open(fname, 'w') as f:
-                pickle.dump(warped_demo, f)
-            print 'saved to', fname
+        # if yes_or_no('dump warped demo?'):
+        #     import pickle
+        #     fname = '/tmp/warped_demo_' + str(np.random.randint(9999999999)) + '.pkl'
+        #     with open(fname, 'w') as f:
+        #         pickle.dump(warped_demo, f)
+        #     print 'saved to', fname
         ELOG.log('SelectTrajectory', 'warped_demo', warped_demo)
 
+        def make_traj(warped_demo, inds=None, xyz_offset=0):
+            traj = {}
+            total_feas_inds = 0
+            all_feas = True
+            for lr in "lr":
+                leftright = {"l":"left","r":"right"}[lr]
+                if best_demo["arms_used"] in [lr, "b"]:
+                    if args.hard_table:
+                        clipinplace(warped_demo["l_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
+                        clipinplace(warped_demo["r_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
+                    pos = warped_demo["%s_gripper_tool_frame"%lr]["position"]
+                    ori = warped_demo["%s_gripper_tool_frame"%lr]["orientation"]
+                    if inds is not None:
+                        pos, ori = pos[inds], ori[inds]
+                    arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
+                        pos + xyz_offset,
+                        ori,
+                        Globals.pr2.robot.GetManipulator("%sarm"%leftright),
+                        "%s_gripper_tool_frame"%lr,
+                        check_collisions=True)
+                    traj["%s_arm"%lr] = arm_traj
+                    traj["%s_arm_feas_inds"%lr] = feas_inds
+                    total_feas_inds += len(feas_inds)
+                    all_feas = all_feas and len(feas_inds) == len(arm_traj)
+                    rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(arm_traj))
+            return traj, total_feas_inds, all_feas
+
+        # Check if we need to move the base for reachability
+        base_offset = np.array([0, 0, 0])
+        if args.use_base:
+            # First figure out how much we need to move the base to maximize feasible points
+            OFFSET = 0.1
+            XYZ_OFFSETS = np.array([[0., 0., 0.], [-OFFSET, 0, 0], [OFFSET, 0, 0], [0, -OFFSET, 0], [0, OFFSET, 0]])
+
+            # demo_len = 0
+            # for lr in "lr":
+            #     if "%s_gripper_tool_frame"%lr in warped_demo:
+            #         demo_len = len(warped_demo["%s_gripper_tool_frame"%lr]["position"])
+            #         break
+            #inds_to_check = np.arange(0, demo_len, demo_len/40) # only check a few of the trajectory points
+            inds_to_check = lfd_traj.where_near_rope(best_demo, xyz_demo_ds)
+            print 'checking inds', inds_to_check
+
+            need_to_move_base = False
+            best_feas_inds, best_xyz_offset = -1, None
+            for xyz_offset in XYZ_OFFSETS:
+                _, n_feas_inds, all_feas = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset)
+                rospy.loginfo('Cloud offset %s has feas inds %d', str(xyz_offset), n_feas_inds)
+                if n_feas_inds > best_feas_inds:
+                    best_feas_inds, best_xyz_offset = n_feas_inds, xyz_offset
+                if all_feas: break
+            if np.linalg.norm(best_xyz_offset) > 0.01:
+                need_to_move_base = True
+            base_offset = -best_xyz_offset
+            rospy.loginfo('Best base offset: %s, with %d feas inds', str(base_offset), best_feas_inds)
+            raw_input('continue?')
+
+            # Move the base
+            if need_to_move_base:
+                userdata.base_offset = base_offset
+                return 'move_base'
+
         Globals.pr2.update_rave()
-        trajectory = {}
 
         # calculate joint trajectory using IK
+        trajectory = make_traj(warped_demo)[0]
+        # fill in gripper/grab stuff
         for lr in "lr":
             leftright = {"l":"left","r":"right"}[lr]
             if best_demo["arms_used"] in [lr, "b"]:
-                if args.hard_table:
-                    clipinplace(warped_demo["l_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
-                    clipinplace(warped_demo["r_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
-                arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
-                    warped_demo["%s_gripper_tool_frame"%lr]["position"],
-                    warped_demo["%s_gripper_tool_frame"%lr]["orientation"],
-                    Globals.pr2.robot.GetManipulator("%sarm"%leftright),
-                    "%s_gripper_tool_frame"%lr,
-                    check_collisions=True
-                )
-                if len(feas_inds) == 0: return "failure"
-                trajectory["%s_arm"%lr] = arm_traj
+                print trajectory["%s_arm_feas_inds"%lr]
+                if len(trajectory["%s_arm_feas_inds"%lr]) == 0: return "failure"
                 trajectory["%s_grab"%lr] = best_demo["%s_gripper_joint"%lr] < .07
                 trajectory["%s_gripper"%lr] = warped_demo["%s_gripper_joint"%lr]
                 trajectory["%s_gripper"%lr][trajectory["%s_grab"%lr]] = 0
+        # for lr in "lr":
+        #     leftright = {"l":"left","r":"right"}[lr]
+        #     if best_demo["arms_used"] in [lr, "b"]:
+        #         if args.hard_table:
+        #             clipinplace(warped_demo["l_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
+        #             clipinplace(warped_demo["r_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
+        #         arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
+        #             warped_demo["%s_gripper_tool_frame"%lr]["position"],
+        #             warped_demo["%s_gripper_tool_frame"%lr]["orientation"],
+        #             Globals.pr2.robot.GetManipulator("%sarm"%leftright),
+        #             "%s_gripper_tool_frame"%lr,
+        #             check_collisions=True
+        #         )
+        #         if len(feas_inds) == 0: return "failure"
+        #         trajectory["%s_arm"%lr] = arm_traj
+        #         trajectory["%s_grab"%lr] = best_demo["%s_gripper_joint"%lr] < .07
+        #         trajectory["%s_gripper"%lr] = warped_demo["%s_gripper_joint"%lr]
+        #         trajectory["%s_gripper"%lr][trajectory["%s_grab"%lr]] = 0
         # smooth any discontinuities in the arm traj
         for lr in "lr":
             leftright = {"l":"left","r":"right"}[lr]
@@ -434,6 +513,39 @@ class SelectTrajectory(smach.State):
         if consent: return "not_done"
         else: return "failure"
 
+
+class MoveBase(smach.State):
+    def __init__(self):
+        smach.State.__init__(self,
+            outcomes = ["success"],
+            input_keys = ["base_offset"],
+            output_keys = [])
+
+    def execute(self, userdata):
+        Globals.pr2.update_rave()
+        base_offset = userdata.base_offset
+
+        STEPS = 10; TIME = 5.
+        xyas = mu.interp2d(np.linspace(0, 1, STEPS), [0, 1], [[0, 0, 0], base_offset])
+        rospy.loginfo('Following base trajectory %s', str(xyas))
+        ts = np.linspace(0, TIME, STEPS)
+
+        pub = rospy.Publisher("base_traj_controller/command", tm.JointTrajectory)
+        #xyacur = np.array(Globals.pr2.base.get_pose("odom_combined"))
+        jt = tm.JointTrajectory()
+        jt.header.frame_id = "base_footprint"
+        for i in xrange(len(xyas)):
+            jtp = tm.JointTrajectoryPoint()
+            jtp.time_from_start = rospy.Duration(ts[i])
+            jtp.positions = xyas[i]#+xyacur
+            jt.points.append(jtp)
+        pub.publish(jt)
+
+        rospy.sleep(TIME*1.5)
+        ELOG.log('MoveBase', 'base_offset', base_offset)
+        return 'success'
+
+
 class ExecuteTrajectory(smach.State):
     def __init__(self):
         """
@@ -450,15 +562,15 @@ class ExecuteTrajectory(smach.State):
     def execute(self, userdata):
         #if not args.test: draw_table()
         Globals.pr2.update_rave()
-        if yes_or_no('about to execute trajectory. save?'):
-            import pickle
-            fname = '/tmp/trajectory_' + str(np.random.randint(9999999999)) + '.pkl'
-            with open(fname, 'w') as f:
-                pickle.dump(userdata.trajectory, f)
-            print 'saved to', fname
+        # if yes_or_no('about to execute trajectory. save?'):
+        #     import pickle
+        #     fname = '/tmp/trajectory_' + str(np.random.randint(9999999999)) + '.pkl'
+        #     with open(fname, 'w') as f:
+        #         pickle.dump(userdata.trajectory, f)
+        #     print 'saved to', fname
         success = lfd_traj.follow_trajectory_with_grabs(Globals.pr2, userdata.trajectory)
         ELOG.log('ExecuteTrajectory', 'success', success)
-        raw_input('done executing segment. press enter to continue')
+        #raw_input('done executing segment. press enter to continue')
         if success:
             if args.count_steps: Globals.stage += 1
             return "success"
@@ -468,7 +580,8 @@ def make_tie_knot_sm():
     sm = smach.StateMachine(outcomes = ["success", "failure"])
     with sm:
         smach.StateMachine.add("look_at_object", LookAtObject(), transitions = {"success":"select_traj", "failure":"failure"})
-        smach.StateMachine.add("select_traj", SelectTrajectory(), transitions = {"done":"success","not_done":"execute_traj", "failure":"failure"})
+        smach.StateMachine.add("select_traj", SelectTrajectory(), transitions = {"done":"success","not_done":"execute_traj", "failure":"failure", "move_base":"move_base"})
+        smach.StateMachine.add("move_base", MoveBase(), transitions = {"success":"look_at_object"})
         smach.StateMachine.add("execute_traj", ExecuteTrajectory(), transitions = {"success":"look_at_object","failure":"look_at_object"})
     return sm
 

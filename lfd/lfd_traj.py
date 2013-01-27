@@ -15,6 +15,7 @@ from jds_utils.math_utils import interp2d
 import traj_ik_graph_search
 import traj_opt
 import openravepy as rave
+import scipy.spatial.distance as ssd
 
 ALWAYS_FAKE_SUCESS = False
 USE_PLANNING = False
@@ -75,6 +76,14 @@ def slice_traj(bodypart2traj, start, stop):
         out[bodypart] = traj[start:stop]
     return out
 
+def where_near_rope(demo, xyz, thresh=.04):
+    near_rope = []
+    for lr in "lr":
+      if demo["arms_used"] in ["b", lr]:
+        pos = np.array(demo["%s_gripper_tool_frame"%lr]["position"])
+        dist_to_rope = ssd.cdist(pos, xyz).min(axis=1)
+        near_rope = np.union1d(near_rope, np.nonzero(dist_to_rope < thresh)[0])
+    return near_rope.astype(int)
 
 def go_to_start(pr2, bodypart2traj):
     """go to start position of each trajectory in bodypart2traj"""
@@ -125,7 +134,7 @@ def follow_trajectory(pr2, bodypart2traj):
             acc_limits.extend(part.acc_limits)
             bodypart2inds[name] = range(n_dof, n_dof+part.n_joints)
             n_dof += part.n_joints
-                        
+
     trajectories = np.concatenate(trajectories, 1)
     #print 'traj orig:'; print trajectories
     #trajectories = np.r_[np.atleast_2d(pr2.get_joint_positions()), trajectories]
@@ -184,6 +193,25 @@ def unwrap_arm_traj(arm_traj):
     for i in UNWRAP_INDICES:
         out[:,i] = np.unwrap(arm_traj[:,i])
     return out
+
+def make_joint_base_traj(all_xyzs, all_quats, all_manips, all_targ_frames, check_collisions=False):
+    n_manips = len(all_manips)
+    assert len(all_xyzs) == len(all_quats) == len(all_manips) == len(all_targ_frames)
+
+    def check_all_feas():
+        solns = []
+        for i in range(n_manips):
+            traj, feas_inds = make_joint_traj_by_graph_search(all_xyzs[i], all_quats[i], all_manips[i], all_targ_frames[i], check_collisions=check_collisions)
+            solns.append((traj, feas_inds))
+            if len(feas_inds) != len(all_xyzs[0]):
+                return None
+        return solns
+
+    for base_pose in base_poses:
+        goto_base_pose(base_pose)
+        solns = check_all_feas(base_pose)
+        if solns is not None:
+            return solns
 
 def make_joint_traj_by_graph_search(xyzs, quats, manip, targ_frame, downsample=1, check_collisions=False):
     assert(len(xyzs) == len(quats))

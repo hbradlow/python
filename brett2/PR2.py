@@ -22,11 +22,6 @@ import rospy
 import geometry_msgs.msg as gm           
 import move_base_msgs.msg as mbm      
 
-try:
-    from bulletsim_msgs.srv import PlanTraj, PlanTrajRequest, PlanTrajResponse
-except ImportError:
-    print "could not import bulletsim_msgs needed for planning"
-
 
 VEL_RATIO = .2
 ACC_RATIO = .3
@@ -95,6 +90,7 @@ class PR2(object):
 
         # set up openrave
         self.env = rave.Environment()
+        self.env.StopSimulation()
         self.env.Load("robots/pr2-beta-static.zae") # todo: use up-to-date urdf
         self.robot = self.env.GetRobots()[0]
 
@@ -109,14 +105,12 @@ class PR2(object):
             )
             if not ikmodel.load():
                 ikmodel.autogenerate()
-            if not ikmodel.setrobot(freeinc=[0.1]):
-                raise RuntimeError('failed to load ik')
+            #if not ikmodel.setrobot(freeinc=[0.1]):
+            #    raise RuntimeError('failed to load ik')
 
         if not rave_only:
             self.joint_listener = TopicListener("/joint_states", sm.JointState)
             self.tf_listener = ros_utils.get_tf_listener()
-
-            #self.planner = rospy.ServiceProxy("/plan_traj", PlanTraj)     
 
             # rave to ros conversions
             joint_msg = self.get_last_joint_message()        
@@ -133,6 +127,22 @@ class PR2(object):
             self.head = Head(self)
             self.torso = Torso(self)
             self.base = Base(self)
+
+            # make the joint limits match the PR2 soft limits
+            low_limits, high_limits = self.robot.GetDOFLimits()
+            rarm_low_limits = [-2.1353981634, -0.3536, -3.75, -2.1213, None, -2.0, None]
+            rarm_high_limits = [0.564601836603, 1.2963, 0.65, -0.15, None, -0.1, None]
+            for rarm_index, low, high in zip(self.robot.GetManipulator("rightarm").GetArmIndices(), rarm_low_limits, rarm_high_limits):
+                if low is not None and high is not None:
+                    low_limits[rarm_index] = low
+                    high_limits[rarm_index] = high
+            larm_low_limits = [-0.564601836603, -0.3536, -0.65, -2.1213, None, -2.0, None]
+            larm_high_limits = [2.1353981634, 1.2963, 3.75, -0.15, None, -0.1, None]
+            for larm_index, low, high in zip(self.robot.GetManipulator("leftarm").GetArmIndices(), larm_low_limits, larm_high_limits):
+                if low is not None and high is not None:
+                    low_limits[larm_index] = low
+                    high_limits[larm_index] = high
+            self.robot.SetDOFLimits(low_limits, high_limits)
 
             rospy.on_shutdown(self.stop_all)
 
@@ -160,6 +170,8 @@ class PR2(object):
         for thread in self.pending_threads:
             thread.join()
         self.pending_threads = []
+    def is_moving(self):
+        return any(thread.is_alive() for thread in self.pending_threads)
 
     def stop_all(self):
         self.larm.stop()
@@ -196,12 +208,17 @@ class TrajectoryControllerWrapper(object):
         return np.array([msg.position[i] for i in self.ros_joint_inds])
 
 
-    def goto_joint_positions(self, positions_goal):
+    def goto_joint_positions(self, positions_goal, unwrap = False):
 
         positions_cur = self.get_joint_positions()
         assert len(positions_goal) == len(positions_cur)
 
         duration = norm((r_[positions_goal] - r_[positions_cur])/self.vel_limits, ord=inf)
+
+        if unwrap:
+            positions_goal = positions_goal.copy()
+            for i in [2,4,6]:
+                positions_goal[i] = np.unwrap([positions_cur[i], positions_goal[i]])[1]
 
         jt = tm.JointTrajectory()
         jt.joint_names = self.joint_names
@@ -217,27 +234,12 @@ class TrajectoryControllerWrapper(object):
 
         rospy.loginfo("%s: starting %.2f sec traj", self.controller_name, duration)
         self.pr2.start_thread(JustWaitThread(duration))
-
-    def goto_joint_positions_planned(self, jpos):
-
-
-        req = PlanTrajRequest()
-        req.start_joints = self.get_joint_positions()
-        req.end_joints = jpos
-        req.side = self.lr
-        req.joint_states = self.pr2.joint_listener.last_msg
-
-        rospy.loginfo("planning...")
-        resp = self.pr2.planner.call(req)
-        rospy.loginfo("done planning!")
-        assert isinstance(resp, PlanTrajResponse)
-        traj = np.asarray(resp.trajectory).reshape(-1,7)
-        self.follow_joint_trajectory(traj)            
+    
 
     def follow_joint_trajectory(self, traj):
         traj = np.r_[np.atleast_2d(self.get_joint_positions()), traj]
-        traj[:,4] = np.unwrap(traj[:,4])
-        traj[:,6] = np.unwrap(traj[:,6])
+        for i in [2,4,6]:
+            traj[:,i] = np.unwrap(traj[:,i])
 
         times = retiming.retime_with_vel_limits(traj, self.vel_limits)
         times_up = np.arange(0,times[-1],.1)
@@ -379,7 +381,7 @@ class Head(TrajectoryControllerWrapper):
         TrajectoryControllerWrapper.__init__(self,pr2,"head_traj_controller")
 
     def set_pan_tilt(self, pan, tilt):
-        self.goto_joint_positions([pan, tilt])
+        self.goto_joint_positions([pan, tilt], unwrap=False)
     def look_at(self, xyz_target, reference_frame, camera_frame):
         self.pr2.update_rave()
 
@@ -428,10 +430,9 @@ class Gripper(object):
         self.controller_pub = rospy.Publisher("%s/command"%self.controller_name, pcm.Pr2GripperCommand)        
 
         self.grip_client = actionlib.SimpleActionClient('%s_gripper_controller/gripper_action'%lr, pcm.Pr2GripperCommandAction)
-        self.grip_client.wait_for_server()
+        #self.grip_client.wait_for_server()
         self.vel_limits = [.033]
         self.acc_limits = [inf]
-
 
         self.diag_pub = rospy.Publisher("/%s_gripper_traj_diagnostic"%lr, tm.JointTrajectory)
 
@@ -454,7 +455,7 @@ class Gripper(object):
     def set_angle_target(self, position, max_effort = default_max_effort):
         self.controller_pub.publish(pcm.Pr2GripperCommand(position=position,max_effort=max_effort))
     def follow_timed_trajectory(self, times, angs):
-        times_up = np.arange(0,times[-1],.1)
+        times_up = np.arange(0,times[-1]+1e-4,.1)
         angs_up = np.interp(times_up,times,angs)
 
 
@@ -476,7 +477,8 @@ class Gripper(object):
         return self.pr2.joint_listener.last_msg.velocity[self.ros_joint_inds[0]]
     def get_effort(self):
         return self.pr2.joint_listener.last_msg.effort[self.ros_joint_inds[0]]
-
+    def get_joint_positions(self):
+        return [self.get_angle()]
 
 class Base(object):
 
@@ -485,9 +487,12 @@ class Base(object):
         self.action_client = actionlib.SimpleActionClient('move_base',mbm.MoveBaseAction)
         self.command_pub = rospy.Publisher('base_controller/command', gm.Twist)        
         self.traj_pub = rospy.Publisher("base_traj_controller/command", tm.JointTrajectory)
+        self.vel_limits = [.2,.2,.3]
+        self.acc_limits = [2,2,2] # note: I didn't think these thru
+        self.n_joints = 3
 
-    def goto_pose(self, x, y, theta, frame_id):
-        trans,rot = conv.xya_to_trans_rot([x,y,theta])
+    def goto_pose(self, xya, frame_id):
+        trans,rot = conv.xya_to_trans_rot(xya)
         pose = conv.trans_rot_to_pose(trans, rot)
         ps = gm.PoseStamped()
         ps.pose = pose
@@ -496,6 +501,7 @@ class Base(object):
 
         goal = mbm.MoveBaseGoal()
         goal.target_pose = ps
+        goal.header.frame_id = frame_id
         rospy.loginfo('Sending move base goal')
         finished = self.action_client.send_goal_and_wait(goal)
         rospy.loginfo('Move base action returned %d.' % finished)
@@ -503,7 +509,7 @@ class Base(object):
 
     def get_pose(self, ref_frame):
         trans, rot =  self.pr2.tf_listener.lookupTransform(ref_frame,"/base_footprint",rospy.Time(0))
-        return (trans[0], trans[1], conv.quat_to_yaw(rot))
+        return np.array([trans[0], trans[1], conv.quat_to_yaw(rot)])
 
     def set_twist(self,xya):
         vx, vy, omega = xya
@@ -513,8 +519,9 @@ class Base(object):
         twist.angular.z = omega
         self.command_pub.publish(twist)
 
-    def follow_timed_trajectory(self, times, xyas):
+    def follow_timed_trajectory(self, times, xyas, frame_id):
         jt = tm.JointTrajectory()
+        jt.header.frame_id = frame_id
         n = len(xyas)
         assert len(times) == n
         for i in xrange(n):            

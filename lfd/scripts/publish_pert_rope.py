@@ -16,6 +16,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--task")
 parser.add_argument("--seg", default=None)
+parser.add_argument('--from_log', type=str, default='')
 parser.add_argument('--s', action='store', type=float, default=0.001, help='variance of randomness to introduce to the b-spline control points')
 parser.add_argument('--n', action='store', type=int, default=1, help='num samples to draw')
 parser.add_argument('--const_radius', type=bool, default=True, help='don\'t use gaussian around each control point with variance s (just use a random angle, with constant radius sqrt(s)')
@@ -38,12 +39,12 @@ class Globals:
     handles = []
     isinstance(pr2, PR2.PR2)
     isinstance(rviz, ros_utils.RvizWrapper)
-    
+
     def __init__(self): raise
 
     @staticmethod
     def setup():
-        if Globals.pr2 is None: 
+        if Globals.pr2 is None:
             Globals.pr2 = PR2.PR2.create()
             #execute_task.load_table()
         if Globals.rviz is None: Globals.rviz = ros_utils.RvizWrapper.create()
@@ -69,6 +70,12 @@ def draw_rope(rope, width, rgba, ns):
         width=width, rgba=rgba, type=Marker.LINE_STRIP, ns=ns
     ))
 
+def draw_cloud(cloud, width, rgba, ns):
+    Globals.handles.append(Globals.rviz.draw_curve(
+        conversions.array_to_pose_array(np.squeeze(cloud), "base_footprint"),
+        rgba=rgba, type=Marker.CUBE_LIST, ns=ns
+    ))
+
 def main():
     Globals.handles = []
     if rospy.get_name() == '/unnamed':
@@ -77,10 +84,15 @@ def main():
 
     rospy.sleep(1)
 
-    cloud_xyz = read_cloud(read_demos())
+    if args.from_log:
+        import logtool
+        cloud_xyz = logtool.get_first_seen_cloud(logtool.read_log(args.from_log))
+    else:
+        cloud_xyz = read_cloud(read_demos())
     rope = ri.find_path_through_point_cloud(cloud_xyz)
     prope = cpert.perturb_curve(rope, args.s, args.const_radius)
 
+    draw_cloud(cloud_xyz, width=0.01, rgba=(1, 0, 1, .5), ns='publish_pert_rope_cloud_orig')
     draw_rope(rope, width=0.01, rgba=(1, 1, 0, 1), ns='publish_pert_rope_orig')
     draw_rope(prope, width=0.01, rgba=(0, 1, 1, 1), ns='publish_pert_rope_perturbed')
 

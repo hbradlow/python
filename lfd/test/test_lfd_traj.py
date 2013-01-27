@@ -2,7 +2,7 @@
 
 from brett2.PR2 import PR2
 import numpy as np
-import roslib; 
+import roslib
 roslib.load_manifest('rospy'); import rospy
 import pickle
 import lfd_traj
@@ -10,6 +10,7 @@ import traj_ik_graph_search
 from kinematics import kinbodies
 import jds_utils.conversions as conv
 import openravepy as rave
+import traj_opt
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -18,6 +19,7 @@ parser.add_argument('--warped_demo', default='')
 parser.add_argument('--slice', default='')
 parser.add_argument('--sim', action='store_true')
 parser.add_argument('--no_table', action='store_true')
+parser.add_argument('--with_base', action='store_true')
 args = parser.parse_args()
 
 
@@ -45,21 +47,69 @@ if args.traj_file:
 else:
     with open(args.warped_demo, 'r') as f:
         warped_demo = pickle.load(f)
-    traj = {}
-    for lr in "lr":
-        leftright = {"l":"left","r":"right"}[lr]
-        #if best_demo["arms_used"] in [lr, "b"]:
-        if True:
-            arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
-                warped_demo["%s_gripper_tool_frame"%lr]["position"],
-                warped_demo["%s_gripper_tool_frame"%lr]["orientation"],
-                pr2.robot.GetManipulator("%sarm"%leftright),
-                "%s_gripper_tool_frame"%lr,
-                check_collisions=True
-            )
-            if len(feas_inds) == 0: assert False and 'failure'
-            traj["%s_arm"%lr] = arm_traj
-            rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(arm_traj))
+
+    def make_traj(warped_demo, inds=None, offset=0):
+        traj = {}
+        total_feas_inds = 0
+        all_feas = True
+        for lr in "lr":
+            leftright = {"l":"left","r":"right"}[lr]
+            if "%s_gripper_tool_frame"%lr in warped_demo:
+                pos = warped_demo["%s_gripper_tool_frame"%lr]["position"]
+                ori = warped_demo["%s_gripper_tool_frame"%lr]["orientation"]
+                if inds is not None:
+                    pos, ori = pos[inds], ori[inds]
+                arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
+                    pos + offset,
+                    ori,
+                    pr2.robot.GetManipulator("%sarm"%leftright),
+                    "%s_gripper_tool_frame"%lr,
+                    check_collisions=True)
+                if len(feas_inds) == 0: assert False and 'failure'
+                traj["%s_arm"%lr] = arm_traj
+                traj["%s_arm_feas_inds"%lr] = feas_inds
+                total_feas_inds += len(feas_inds)
+                all_feas = all_feas and len(feas_inds) == len(arm_traj)
+                rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(arm_traj))
+        return traj, total_feas_inds, all_feas
+
+    traj = None
+    best_offset = np.array([0., 0., 0.])
+    if args.with_base:
+        best_traj, best_feas_inds = None, -1
+        OFFSET = 0.1
+
+        demo_len = 0
+        for lr in "lr":
+            if "%s_gripper_tool_frame"%lr in warped_demo:
+                demo_len = len(warped_demo["%s_gripper_tool_frame"%lr]["position"])
+                break
+        inds_to_check = np.arange(0, demo_len, demo_len/20)
+
+        for offset in [np.array([0., 0., 0.]), np.array([-OFFSET, 0, 0]), np.array([OFFSET, 0, 0]), np.array([0, -OFFSET, 0]), np.array([0, OFFSET, 0])]:
+            traj, num_feas_inds, all_feas = make_traj(warped_demo, inds=inds_to_check, offset=offset)
+            print 'offset, feas inds:', offset, num_feas_inds
+            if num_feas_inds > best_feas_inds:
+                best_traj, best_feas_inds, best_offset = traj, num_feas_inds, offset
+            if all_feas:
+                break
+        print 'Best base offset:', -best_offset, 'with', best_feas_inds, 'feas inds'
+
+    traj = make_traj(warped_demo, offset=best_offset)[0]
+
+    # if args.with_base and 'l_arm' in traj and 'r_arm' in traj:
+        # asdf = traj_opt.move_arms_base(
+        #     pr2.env,
+        #     warped_demo["l_gripper_tool_frame"]["position"],
+        #     warped_demo["l_gripper_tool_frame"]["orientation"],
+        #     traj['l_arm'],
+        #     warped_demo["r_gripper_tool_frame"]["position"],
+        #     warped_demo["r_gripper_tool_frame"]["orientation"],
+        #     traj['r_arm']
+        # )
+        # print asdf
+
+
 
 def show_ik_solns(part_name, manip, i, warped_demo):
     frame = "%s_gripper_tool_frame"%part_name[0]
@@ -111,7 +161,13 @@ if args.sim:
         handles = []
         for lr in 'lr':
             if "%s_gripper_tool_frame"%lr in warped_demo:
-                handles.append(pr2.env.plot3(points=warped_demo["%s_gripper_tool_frame"%lr]['position'], pointsize=1.0))
+                pos = warped_demo["%s_gripper_tool_frame"%lr]['position']
+                handles.append(pr2.env.plot3(points=pos, colors=np.tile([0, 0, 1], (len(pos),1)), pointsize=1.0))
+                if "%s_arm_feas_inds"%lr in traj:
+                    inds = np.asarray(range(len(pos)))
+                    infeas_inds = np.setdiff1d(inds, traj["%s_arm_feas_inds"%lr])
+                    if len(infeas_inds) > 0:
+                        handles.append(pr2.env.plot3(points=pos[infeas_inds], colors=np.tile([1, 0, 0], (len(infeas_inds),1)), pointsize=5.0))
 
     with pr2.env:
         l_len, r_len = 0, 0
