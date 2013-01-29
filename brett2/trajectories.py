@@ -65,6 +65,7 @@ def follow_body_traj2(pr2, bodypart2traj, times=None, wait=True, base_frame = "/
                  "r_gripper":pr2.rgrip, 
                  "l_arm":pr2.larm, 
                  "r_arm":pr2.rarm,
+                 "torso":pr2.torso,
                  "base":pr2.base}
     
     for (name, part) in name2part.items():
@@ -91,7 +92,7 @@ def follow_body_traj2(pr2, bodypart2traj, times=None, wait=True, base_frame = "/
             part_traj = traj_up[:,bodypart2inds[name]]
             if name == "l_gripper" or name == "r_gripper":
                 part.follow_timed_trajectory(times_up, part_traj.flatten())
-            elif name == "l_arm" or name == "r_arm":
+            elif name == "l_arm" or name == "r_arm" or name == "torso":
                 vels = ku.get_velocities(part_traj, times_up, .001)
                 part.follow_timed_joint_trajectory(part_traj, vels, times_up)
             elif name == "base":
@@ -167,6 +168,7 @@ def follow_rave_trajectory(pr2, ravetraj, dof_inds, use_base = False, base_frame
     rave2ros = {}
     name2part = {"l_gripper":pr2.lgrip, 
                  "r_gripper":pr2.rgrip, 
+                 "torso":pr2.torso, 
                  "l_arm":pr2.larm, 
                  "r_arm":pr2.rarm}
     for (partname, part) in name2part.items():
