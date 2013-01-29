@@ -13,8 +13,8 @@ import argparse
 # Used in simulation (Gazebo)
 # roscore needs to be running for this test; Gazebo or the actual robot should be started already so roscore shouldn't need to be started separately
 
-EMPTY_MOVE_PARAM_FILE = osp.join(osp.dirname(osp.abspath(__file__)), "multi_item/multi_item_params/empty_move_params.yaml")
 TEST_DATA_DIR = "multi_item/empty_move_data"
+EMPTY_MOVE_PARAM_FILE = osp.join(osp.dirname(__file__), TEST_DATA_DIR, "empty_move_params.yaml")
 
 # gets the parameters from the parameters file for the test
 # currently, the only parameter is a fake table
@@ -51,11 +51,11 @@ def do_empty_move(demo_name, exp_name, test_dir_name):
 
     verb_data_accessor = multi_item_verbs.VerbDataAccessor(test_info_dir=osp.join("test", TEST_DATA_DIR, test_dir_name))
 
-    for current_stage in xrange(verb_data_accessor.get_num_stages(demo_name)):
+    for stage_num in xrange(verb_data_accessor.get_num_stages(demo_name)):
         # info and data for previous stage
-        if current_stage > 0:
-            prev_demo_info = verb_data_accessor.get_stage_info(demo_name, current_stage-1)
-            prev_exp_info = verb_data_accessor.get_stage_info(exp_name, current_stage-1)
+        if stage_num > 0:
+            prev_demo_info = verb_data_accessor.get_stage_info(demo_name, stage_num-1)
+            prev_exp_info = verb_data_accessor.get_stage_info(exp_name, stage_num-1)
             prev_exp_data = verb_data_accessor.get_demo_stage_data(prev_exp_info.stage_name)
             prev_exp_pc = prev_exp_data["object_cloud"][prev_exp_info.item]["xyz"]
         else:
@@ -63,25 +63,31 @@ def do_empty_move(demo_name, exp_name, test_dir_name):
             prev_demo_info, prev_exp_info, prev_exp_data, prev_exp_pc = None, None, None, None
 
         # info and data for current stage
-        cur_demo_info = verb_data_accessor.get_stage_info(demo_name, current_stage)
-        cur_exp_info = verb_data_accessor.get_stage_info(exp_name, current_stage)
+        cur_demo_info = verb_data_accessor.get_stage_info(demo_name, stage_num)
+        cur_exp_info = verb_data_accessor.get_stage_info(exp_name, stage_num)
         cur_exp_data = verb_data_accessor.get_demo_stage_data(cur_exp_info.stage_name)
         cur_exp_pc = cur_exp_data["object_cloud"][cur_exp_info.item]["xyz"]
 
-        warped_traj_resp = multi_item_make_verb_traj.make_traj_multi_stage_do_work(cur_demo_info, cur_exp_pc,
-                                                                                   "base_footprint", current_stage,
-                                                                                   prev_demo_info, prev_exp_pc,
-                                                                                   verb_data_accessor, transform_type="tps_zrot")
+        if stage_num == 0:
+            world_to_grip_transform_func = None
+        else:
+            world_to_grip_transform_func = multi_item_make_verb_traj.make_world_to_grip_transform_tf("%s_gripper_tool_frame" % cur_exp_info.arms_used)
 
+        warped_traj_resp = multi_item_make_verb_traj.make_traj_multi_stage_do_work(demo_name, cur_exp_pc, "base_footprint",
+                                                                                   stage_num, prev_demo_info, prev_exp_pc,
+                                                                                   verb_data_accessor, world_to_grip_transform_func, transform_type="tps_zrot")
+
+        
         yn = yes_or_no("continue?")
         if yn:
+            can_move_lower = (stage_num == 0)
             traj = warped_traj_resp.traj
             exec_verb_traj.exec_traj_do_work(traj.l_gripper_poses.poses, traj.l_gripper_angles,
                                              traj.r_gripper_poses.poses, traj.r_gripper_angles,
-                                             traj_ik_func=ik_functions.do_traj_ik_graph_search,
-                                             obj_cloud_xyz=cur_exp_pc, obj_name=cur_demo_info.item)
+                                             ik_functions.do_traj_ik_graph_search, cur_exp_pc,
+                                             cur_demo_info.item, can_move_lower)
 
-        if current_stage < verb_data_accessor.get_num_stages(demo_name)-1:
+        if stage_num < verb_data_accessor.get_num_stages(demo_name)-1:
             yn = yes_or_no("continue to next stage?")
             if not yn:
                 break
@@ -91,7 +97,7 @@ def do_empty_move(demo_name, exp_name, test_dir_name):
 # returns a dictionary: { verb -> (test directory name, [list of demo names]) }
 def get_test_demos():
     abs_test_dir = osp.join(osp.dirname(osp.abspath(__file__)), TEST_DATA_DIR)
-    test_demo_dirs = os.listdir(abs_test_dir)
+    test_demo_dirs = [entry for entry in os.listdir(abs_test_dir) if osp.isdir(osp.join(abs_test_dir, entry))]
     test_demos = {}
     for test_demo_dir in test_demo_dirs:
         verb_data_accessor = multi_item_verbs.VerbDataAccessor(osp.join(abs_test_dir, test_demo_dir))

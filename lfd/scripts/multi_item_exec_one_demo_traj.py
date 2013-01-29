@@ -70,7 +70,7 @@ def get_all_clouds_pc2(num_objs):
         clouds.append(next_cloud)
     return clouds
 
-# execute for a single stage (manually do the previous stage)
+# execute for a single stage test (manually do the previous stage)
 def do_single(demo_name, stage_num, prev_demo_index, verb_data_accessor, prev_and_cur_pc2):
     if stage_num == 0:
         do_stage(demo_name, stage_num, None, None, prev_and_cur_pc2[1], verb_data_accessor)
@@ -86,19 +86,29 @@ def do_single(demo_name, stage_num, prev_demo_index, verb_data_accessor, prev_an
 
         do_stage(demo_name, stage_num, prev_stage_info, prev_and_cur_pc2[0], prev_and_cur_pc2[1], verb_data_accessor)
 
-# execute a stage as part of a full experiment
+# execute a single stage
 def do_stage(demo_name, stage_num, prev_stage_info, prev_exp_pc2, cur_exp_pc2, verb_data_accessor):
     stage_info = verb_data_accessor.get_stage_info(demo_name, stage_num)
     make_req = get_trajectory_request(stage_info.verb, cur_exp_pc2)
 
-    make_resp = multi_item_make_verb_traj.make_traj_multi_stage(make_req, stage_info, stage_num, prev_stage_info, prev_exp_pc2, verb_data_accessor, transform_type="tps_zrot")
-    #make_resp = multi_item_make_verb_traj.make_traj_multi_stage(make_req, stage_info, stage_num, prev_stage_info, prev_exp_pc2, verb_data_accessor, transform_type="rigid2d")
+    if stage_num == 0:
+        grip_to_world_transform_func = None
+    else:
+        grip_to_world_transform_func = multi_item_make_verb_traj.make_grip_to_world_transform_tf("%s_gripper_tool_frame" %
+                                                                                                 verb_data_accessor.get_stage_info(demo_name, stage_num).arms_used)
+
+    make_resp = multi_item_make_verb_traj.make_traj_multi_stage(make_req, demo_name,
+                                                                stage_num, prev_stage_info,
+                                                                prev_exp_pc2, verb_data_accessor,
+                                                                "tps_zrot")
     
+    can_move_lower = (stage_num == 0)
     yn = yes_or_no("continue?")
     if yn:
         exec_req = ExecTrajectoryRequest()
         exec_req.traj = make_resp.traj
-        exec_verb_traj.exec_traj(exec_req, traj_ik_func=ik_functions.do_traj_ik_graph_search, obj_pc=cur_exp_pc2, obj_name=stage_info.item)
+        exec_verb_traj.exec_traj(exec_req, traj_ik_func=ik_functions.do_traj_ik_graph_search,
+                                 obj_pc=cur_exp_pc2, obj_name=stage_info.item, can_move_lower=can_move_lower)
 
 # do a full experiment using the specified stages (stages are from different demos)
 # demo base name is the verb and items without the index (e.g. the demo base name for demo pour-cup-bowl0 is pour-cup-bowl)
@@ -145,6 +155,11 @@ def get_args():
     args = parser.parse_args()
     return args
 
+def find_closest_demo(verb, exp_clouds_pc2):
+    exp_clouds = [pc2xyzrgb(cloud)[0] for cloud in exp_clouds_pc2]
+    closest_demo_name = scene_diff.get_closest_demo(verb, exp_clouds)
+    return closest_demo_name
+
 # determines the type of experiment (single or full) to run based on the args
 # calls the corresponding function to do the actual experiment (do_single, do_multiple_single_demo, do_multiple_varied_demos)
 def run_exp(args, verb_data_accessor):
@@ -152,8 +167,8 @@ def run_exp(args, verb_data_accessor):
     print "using demo base", args.demo
     if args.verb is not None:
         exp_clouds_pc2 = get_all_clouds_pc2(verb_data_accessor.get_num_stages_for_verb(args.verb))
-        exp_clouds = [pc2xyzrgb(cloud)[0] for cloud in exp_clouds_pc2]
-        closest_demo_name = scene_diff.get_closest_demo(args.verb, exp_clouds)
+        closest_demo_name = find_closest_demo(args.verb, exp_clouds_pc2)
+        print "Closest demo is %s" % (closest_demo_name)
         do_multiple_single_demo(closest_demo_name, verb_data_accessor, exp_clouds_pc2)
     if args.single is not None:
         params = [int(num) for num in args.single.split(',')]
@@ -172,6 +187,8 @@ def run_exp(args, verb_data_accessor):
         if args.stages[0] == 'a':
             demo_name = "%s%s" % (demo_base_name, args.stages[1:])
             exp_clouds_pc2 = get_all_clouds_pc2(verb_data_accessor.get_num_stages(demo_name))
+            closest_demo_name = find_closest_demo(verb_data_accessor.get_verb_from_demo_name(demo_name), exp_clouds_pc2)
+            print "Closest demo is %s" % (closest_demo_name)
             do_multiple_single_demo(demo_name, verb_data_accessor, exp_clouds_pc2)
         else:
             stages = [int(stage) for stage in args.stages.split(",")]
