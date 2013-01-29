@@ -3,6 +3,7 @@
 import os
 import pickle
 import matplotlib.pyplot as plt
+import numpy as np
 
 def read_logs(logfiles):
     logs = []
@@ -32,14 +33,27 @@ def get_first_seen_cloud(log_data):
 #     plt.axis('equal')
 #     plt.show()
 
+def calc_rope_dist(rope, prope):
+    min_len = min(len(rope), len(prope))
+    rope, prope = rope[:min_len], prope[:min_len]
+    rope = rope - np.mean(rope, axis=0)
+    prope = prope - np.mean(prope, axis=0)
+    return np.mean(np.sqrt(((rope - prope)**2).sum(axis=1)))
+
 def view_rope(args, logs):
     import rope_initialization as ri
+    if args.calc_dist_vs != -1:
+        base_rope = ri.find_path_through_point_cloud_simple(get_first_seen_cloud(logs[args.calc_dist_vs]))
     for i, log_data in enumerate(logs):
         offset_x = i*args.offset_x if args.offset_x > 0 else 0
         cloud_xyz = get_first_seen_cloud(log_data)
         rope = ri.find_path_through_point_cloud(cloud_xyz)
-        plt.plot(cloud_xyz[:,0] + offset_x, cloud_xyz[:,1], 'bo', alpha=.1)
-        plt.plot(rope[:,0] + offset_x, rope[:,1], 'g.-')
+        plt.plot(cloud_xyz[:,0] + offset_x, cloud_xyz[:,1], 'b.', alpha=.5)
+        plt.plot(rope[:,0] + offset_x, rope[:,1], 'g.-', alpha=.3)
+
+        if i != args.calc_dist_vs and args.calc_dist_vs != -1:
+            print 'Dist from', i, 'to', args.calc_dist_vs, '=', min(calc_rope_dist(rope, base_rope), calc_rope_dist(rope, base_rope[::-1]))
+
     plt.axis('equal')
     plt.show()
 
@@ -69,6 +83,7 @@ def main():
 
     parser_view_rope = subparsers.add_parser('view_rope')
     parser_view_rope.add_argument('--offset_x', type=float, default=-1)
+    parser_view_rope.add_argument('--calc_dist_vs', type=int, default=-1)
     parser_view_rope.set_defaults(func=view_rope)
 
     parser_extract_data = subparsers.add_parser('extract_data')

@@ -18,7 +18,7 @@ def _perturb_control_pts(in_pts, s, const_radius):
     if const_radius:
         for i in range(len(pts)):
             angle = np.random.rand()*2*np.pi
-            pts[i] += np.sqrt(s) * np.array([np.cos(angle), np.sin(angle)])
+            pts[i] += s * np.array([np.cos(angle), np.sin(angle)])
     else:
         cov = [[s, 0], [0, s]]
         for i in range(len(pts)):
@@ -75,8 +75,20 @@ def _resample_spline(spline, tolerance=0.0001):
     return (spline[0], newu)
 
 def perturb_curve(curve, s=0.001, const_radius=False):
-    new_spline = _resample_spline(_perturb_spline(_to_spline(curve), s, const_radius))
+    #import matplotlib.pyplot as plt
+    orig_spline = _to_spline(curve)
+    #plt.plot(_get_spline_control_pts(orig_spline)[:,0], _get_spline_control_pts(orig_spline)[:,1], 'go')
+    #plt.plot(curve[:,0], curve[:,1], 'g.-')
+
+    new_spline = _resample_spline(_perturb_spline(orig_spline, s, const_radius))
+    #plt.plot(_get_spline_control_pts(new_spline)[:,0], _get_spline_control_pts(new_spline)[:,1], 'ro')
+
     new_curve = _adjust_curve(_eval_spline(new_spline), curve)
+    #plt.plot(new_curve[:,0], new_curve[:,1], 'r.-')
+
+    #plt.axis('equal')
+    #plt.show()
+
     assert new_curve.shape == curve.shape
     return new_curve
 
@@ -93,7 +105,10 @@ if __name__ == '__main__':
     assert os.path.exists(args.input)
 
     import matplotlib.pyplot as plt
-    curve = np.loadtxt(args.input)
+    #curve = np.loadtxt(args.input)
+    import logtool
+    import rope_initialization as ri
+    curve = ri.find_path_through_point_cloud(logtool.get_first_seen_cloud(logtool.read_log(args.input)))
     plt.plot(curve[:,0], curve[:,1], 'b.-')
     for _ in range(args.n):
         new_curve = perturb_curve(curve, args.s, args.const_radius)

@@ -109,7 +109,7 @@ class BaseTrajectoryController(TrajectoryController):
                 return
             
             t_elapsed = time() - t_start
-            if t_elapsed > duration+5: 
+            if t_elapsed > duration+1:
                 rospy.loginfo("time elapsed (+1sec)--leaving control loop")
                 if plot:
                     import pylab

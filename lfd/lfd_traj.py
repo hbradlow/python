@@ -76,13 +76,20 @@ def slice_traj(bodypart2traj, start, stop):
         out[bodypart] = traj[start:stop]
     return out
 
-def where_near_rope(demo, xyz, thresh=.04):
+def where_near_rope(demo, xyz, thresh=.04, add_other_points=-1):
     near_rope = []
+    traj_len = 0
     for lr in "lr":
       if demo["arms_used"] in ["b", lr]:
         pos = np.array(demo["%s_gripper_tool_frame"%lr]["position"])
+        traj_len = len(pos)
         dist_to_rope = ssd.cdist(pos, xyz).min(axis=1)
-        near_rope = np.union1d(near_rope, np.nonzero(dist_to_rope < thresh)[0])
+        close_inds = np.nonzero(dist_to_rope < thresh)[0]
+        slice_step = len(close_inds)/100 or 1
+        near_rope = np.union1d(near_rope, close_inds[::slice_step])
+    if add_other_points > 0:
+        near_rope = np.union1d(near_rope, np.arange(0, traj_len, traj_len/add_other_points))
+        near_rope = np.union1d(near_rope, [0, traj_len-1])
     return near_rope.astype(int)
 
 def go_to_start(pr2, bodypart2traj):
@@ -251,6 +258,23 @@ def make_joint_traj_by_graph_search(xyzs, quats, manip, targ_frame, downsample=1
     path_init_us = mu.interp2d(range(orig_len), range(orig_len)[::downsample], path_init) # un-downsample
     assert len(path_init_us) == orig_len
     return path_init_us, timesteps
+
+def compute_feas_inds(xyzs, quats, manip, targ_frame, check_collisions=False):
+    assert(len(xyzs) == len(quats))
+    hmats = [conv.trans_rot_to_hmat(xyz, quat) for xyz, quat in zip(xyzs, quats)]
+
+    link = manip.GetRobot().GetLink(targ_frame)
+    Tcur_w_link = link.GetTransform()
+    Tcur_w_ee = manip.GetEndEffectorTransform()
+    Tf_link_ee = np.linalg.solve(Tcur_w_link, Tcur_w_ee)
+
+    def ikfunc(hmat):
+        return manip.FindIKSolutions(hmat.dot(Tf_link_ee), 2+16 + (1 if check_collisions else 0))
+
+    feas_inds = traj_ik_graph_search.compute_feas_inds(hmats, ikfunc)
+    rospy.loginfo("%s: %i of %i points feasible", manip.GetName(), len(feas_inds), len(hmats))
+    return feas_inds
+
 
 def make_joint_traj(xyzs, quats, joint_seeds,manip, ref_frame, targ_frame,filter_options):
     """

@@ -62,6 +62,9 @@ def build_graph_part(nodecost_func, solns0, solnsprev):
     num_nodes = len(solns0)
     return ncost_nk_i, ecost_nkk_i, num_nodes
 
+def compute_feas_inds(hmats, ikfunc):
+    return [ i for i, hmat in enumerate(hmats) if len(ikfunc(hmat)) > 0 ]
+
 def traj_cart2joint(hmats, ikfunc, start_joints = None, nodecost=None):
     """
     hmats: poses at times t = 0,1,2,...T-1

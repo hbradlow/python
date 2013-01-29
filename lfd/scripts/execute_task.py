@@ -110,6 +110,8 @@ demos_file = h5py.File(H5FILE,"r")
 rospy.loginfo("loading demos into memory")
 demos = warping.group_to_dict(demos_file)
 
+last_selected_segment = ''
+
 if args.test:
     lfd_traj.ALWAYS_FAKE_SUCCESS = True
 
@@ -296,6 +298,8 @@ class SelectTrajectory(smach.State):
         ELOG.log('SelectTrajectory', 'costs_names', costs_names)
         _, best_name = min(costs_names)
 
+        global last_selected_segment
+        print 'Last selected segment:', last_selected_segment
         if args.human_select_demo:
             print 'Calculated best demo:', best_name
             best_name = None
@@ -311,6 +315,7 @@ class SelectTrajectory(smach.State):
 
         best_demo = demos[best_name]
         rospy.loginfo("best segment name: %s", best_name)
+        last_selected_segment = best_name
         xyz_demo_ds = best_demo["cloud_xyz_ds"]
         ELOG.log('SelectTrajectory', 'xyz_demo_ds', xyz_demo_ds)
 
@@ -366,7 +371,7 @@ class SelectTrajectory(smach.State):
         #     print 'saved to', fname
         ELOG.log('SelectTrajectory', 'warped_demo', warped_demo)
 
-        def make_traj(warped_demo, inds=None, xyz_offset=0):
+        def make_traj(warped_demo, inds=None, xyz_offset=0, feas_check_only=False):
             traj = {}
             total_feas_inds = 0
             all_feas = True
@@ -376,21 +381,31 @@ class SelectTrajectory(smach.State):
                     if args.hard_table:
                         clipinplace(warped_demo["l_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
                         clipinplace(warped_demo["r_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
-                    pos = warped_demo["%s_gripper_tool_frame"%lr]["position"]
+                    pos = warped_demo["%s_gripper_tool_frame"%lr]["position"] + xyz_offset
                     ori = warped_demo["%s_gripper_tool_frame"%lr]["orientation"]
                     if inds is not None:
                         pos, ori = pos[inds], ori[inds]
-                    arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
-                        pos + xyz_offset,
-                        ori,
-                        Globals.pr2.robot.GetManipulator("%sarm"%leftright),
-                        "%s_gripper_tool_frame"%lr,
-                        check_collisions=True)
-                    traj["%s_arm"%lr] = arm_traj
-                    traj["%s_arm_feas_inds"%lr] = feas_inds
+
+                    if feas_check_only:
+                        feas_inds = lfd_traj.compute_feas_inds(
+                            pos,
+                            ori,
+                            Globals.pr2.robot.GetManipulator("%sarm"%leftright),
+                            "%s_gripper_tool_frame"%lr,
+                            check_collisions=True)
+                        traj["%s_arm_feas_inds"%lr] = feas_inds
+                    else:
+                        arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
+                            pos,
+                            ori,
+                            Globals.pr2.robot.GetManipulator("%sarm"%leftright),
+                            "%s_gripper_tool_frame"%lr,
+                            check_collisions=True)
+                        traj["%s_arm"%lr] = arm_traj
+                        traj["%s_arm_feas_inds"%lr] = feas_inds
                     total_feas_inds += len(feas_inds)
-                    all_feas = all_feas and len(feas_inds) == len(arm_traj)
-                    rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(arm_traj))
+                    all_feas = all_feas and len(feas_inds) == len(pos)
+                    rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(pos))
             return traj, total_feas_inds, all_feas
 
         # Check if we need to move the base for reachability
@@ -406,13 +421,13 @@ class SelectTrajectory(smach.State):
             #         demo_len = len(warped_demo["%s_gripper_tool_frame"%lr]["position"])
             #         break
             #inds_to_check = np.arange(0, demo_len, demo_len/40) # only check a few of the trajectory points
-            inds_to_check = lfd_traj.where_near_rope(best_demo, xyz_demo_ds)
+            inds_to_check = lfd_traj.where_near_rope(best_demo, xyz_demo_ds, add_other_points=30)
             print 'checking inds', inds_to_check
 
             need_to_move_base = False
             best_feas_inds, best_xyz_offset = -1, None
             for xyz_offset in XYZ_OFFSETS:
-                _, n_feas_inds, all_feas = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset)
+                _, n_feas_inds, all_feas = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset, feas_check_only=True)
                 rospy.loginfo('Cloud offset %s has feas inds %d', str(xyz_offset), n_feas_inds)
                 if n_feas_inds > best_feas_inds:
                     best_feas_inds, best_xyz_offset = n_feas_inds, xyz_offset
@@ -421,12 +436,14 @@ class SelectTrajectory(smach.State):
                 need_to_move_base = True
             base_offset = -best_xyz_offset
             rospy.loginfo('Best base offset: %s, with %d feas inds', str(base_offset), best_feas_inds)
-            raw_input('continue?')
 
             # Move the base
             if need_to_move_base:
+                rospy.loginfo('Will move base.')
                 userdata.base_offset = base_offset
                 return 'move_base'
+            else:
+                rospy.loginfo('Will not move base.')
 
         Globals.pr2.update_rave()
 
@@ -541,7 +558,7 @@ class MoveBase(smach.State):
             jt.points.append(jtp)
         pub.publish(jt)
 
-        rospy.sleep(TIME*1.5)
+        rospy.sleep(TIME*2)
         ELOG.log('MoveBase', 'base_offset', base_offset)
         return 'success'
 

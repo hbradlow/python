@@ -15,7 +15,7 @@ from jds_utils import conversions
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--task")
-parser.add_argument("--seg", default=None)
+parser.add_argument("--seg", default='00.00')
 parser.add_argument('--from_log', type=str, default='')
 parser.add_argument('--s', action='store', type=float, default=0.001, help='variance of randomness to introduce to the b-spline control points')
 parser.add_argument('--n', action='store', type=int, default=1, help='num samples to draw')
@@ -32,6 +32,13 @@ def select_from_list(list):
             print "invalid response. try again."
         else:
             return list[strlist.index(resp)]
+
+def alternate(arr1, arr2):
+    assert arr1.shape == arr2.shape
+    out = np.zeros((2*arr1.shape[0], arr1.shape[1]),arr1.dtype)
+    out[0::2] = arr1
+    out[1::2] = arr2
+    return out
 
 class Globals:
     pr2 = None
@@ -76,6 +83,29 @@ def draw_cloud(cloud, width, rgba, ns):
         rgba=rgba, type=Marker.CUBE_LIST, ns=ns
     ))
 
+def draw_lines(starts, ends, width, rgba, ns):
+    Globals.handles.append(Globals.rviz.draw_curve(
+        conversions.array_to_pose_array(np.squeeze(cloud), "base_footprint"),
+        rgba=rgba, type=Marker.CUBE_LIST, ns=ns
+    ))
+
+def draw_movement_markers(rope, r, rgba, ns):
+    pts = rope[::(len(rope)/5 or 1)]
+    angles = np.random.rand(pts.shape[0])*2*np.pi
+    pts2 = pts.copy()
+    pts2[:,:2] += np.c_[r*np.cos(angles), r*np.sin(angles)]
+    Globals.handles.append(Globals.rviz.draw_curve(
+        conversions.array_to_pose_array(alternate(pts, pts2), "base_footprint"),
+        rgba=rgba, type=Marker.LINE_LIST, ns=ns
+    ))
+    Globals.handles.append(Globals.rviz.draw_curve(
+        conversions.array_to_pose_array(pts2, "base_footprint"),
+        rgba=rgba, type=Marker.CUBE_LIST, ns=ns, width=.02
+    ))
+
+def calc_rope_dist(rope, prope):
+    return np.mean(np.sqrt(((rope - prope)**2).sum(axis=1)))
+
 def main():
     Globals.handles = []
     if rospy.get_name() == '/unnamed':
@@ -90,12 +120,14 @@ def main():
     else:
         cloud_xyz = read_cloud(read_demos())
     rope = ri.find_path_through_point_cloud(cloud_xyz)
-    prope = cpert.perturb_curve(rope, args.s, args.const_radius)
+    #prope = cpert.perturb_curve(rope, args.s, args.const_radius)
 
     draw_cloud(cloud_xyz, width=0.01, rgba=(1, 0, 1, .5), ns='publish_pert_rope_cloud_orig')
     draw_rope(rope, width=0.01, rgba=(1, 1, 0, 1), ns='publish_pert_rope_orig')
-    draw_rope(prope, width=0.01, rgba=(0, 1, 1, 1), ns='publish_pert_rope_perturbed')
+    #draw_rope(prope, width=0.01, rgba=(0, 1, 1, 1), ns='publish_pert_rope_perturbed')
+    draw_movement_markers(rope, args.s, rgba=(0, 1, 1, 1), ns='publish_pert_rope_movement')
 
+    #rospy.loginfo('generated rope has mean distance %f', calc_rope_dist(rope, prope))
     rospy.loginfo('Publishing...')
     while not rospy.is_shutdown():
         for h in Globals.handles:
