@@ -229,10 +229,10 @@ def plot_correspondence(x_nd, y_nd):
     ax.add_collection(lc)
     plt.draw()
 
-def plot_correspondence_3d(x_nd, y_nd, center=True):
-    if center:
-        c = np.mean(x_nd, axis=0)
-        x_nd, y_nd = x_nd - c[None,:], y_nd - c[None,:]
+def plot_correspondence_3d(x_nd, y_nd):
+    # if center:
+    #     c = np.mean(x_nd, axis=0)
+    #     x_nd, y_nd = x_nd - c[None,:], y_nd - c[None,:]
     lines = np.array(zip(x_nd, y_nd))
     from mpl_toolkits import mplot3d
     from mpl_toolkits.mplot3d import art3d
@@ -241,7 +241,7 @@ def plot_correspondence_3d(x_nd, y_nd, center=True):
     ax.add_collection3d(art3d.Line3DCollection(lines))
     ax.scatter(x_nd[:,0], x_nd[:,1], x_nd[:,2], c='g')
     ax.scatter(y_nd[:,0], y_nd[:,1], y_nd[:,2], c='r')
-    plt.show()
+    plt.draw()
 
 def loglinspace(a,b,n):
     "n numbers between a to b (inclusive) with constant ratio between consecutive numbers"

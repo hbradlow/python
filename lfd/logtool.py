@@ -16,14 +16,19 @@ def read_logs(logfiles):
 def read_log(logfile):
     return read_logs([logfile])[0]
 
-def get_first_seen_cloud(log_data):
+def get_cloud(log_data, i=-1):
     cloud_xyz = None
-    for entry in log_data:
-        if entry['state'] == 'LookAtObject' and entry['msg'] == 'xyz':
-            cloud_xyz = entry['data']
-            break
-    if cloud_xyz is None:
-        raise RuntimeError('cannot find LookAtObject xyz entry')
+    if i == -1:
+        for entry in log_data:
+            if entry['state'] == 'LookAtObject' and entry['msg'] == 'xyz':
+                cloud_xyz = entry['data']
+                break
+        if cloud_xyz is None:
+            raise RuntimeError('cannot find LookAtObject xyz entry')
+    else:
+        entry = log_data[i]
+        assert entry['state'] == 'LookAtObject' and entry['msg'] == 'xyz'
+        cloud_xyz = entry['data']
     return cloud_xyz
 
 # def view_cloud(logs):
@@ -43,13 +48,14 @@ def calc_rope_dist(rope, prope):
 def view_rope(args, logs):
     import rope_initialization as ri
     if args.calc_dist_vs != -1:
-        base_rope = ri.find_path_through_point_cloud_simple(get_first_seen_cloud(logs[args.calc_dist_vs]))
+        base_rope = ri.find_path_through_point_cloud_simple(get_cloud(logs[args.calc_dist_vs]))
     for i, log_data in enumerate(logs):
         offset_x = i*args.offset_x if args.offset_x > 0 else 0
-        cloud_xyz = get_first_seen_cloud(log_data)
-        rope = ri.find_path_through_point_cloud(cloud_xyz)
+        cloud_xyz = get_cloud(log_data, args.i)
         plt.plot(cloud_xyz[:,0] + offset_x, cloud_xyz[:,1], 'b.', alpha=.5)
-        plt.plot(rope[:,0] + offset_x, rope[:,1], 'g.-', alpha=.3)
+        if not args.cloud_only:
+            rope = ri.find_path_through_point_cloud(cloud_xyz)
+            plt.plot(rope[:,0] + offset_x, rope[:,1], 'g.-', alpha=.3)
 
         if i != args.calc_dist_vs and args.calc_dist_vs != -1:
             print 'Dist from', i, 'to', args.calc_dist_vs, '=', min(calc_rope_dist(rope, base_rope), calc_rope_dist(rope, base_rope[::-1]))
@@ -84,6 +90,8 @@ def main():
     parser_view_rope = subparsers.add_parser('view_rope')
     parser_view_rope.add_argument('--offset_x', type=float, default=-1)
     parser_view_rope.add_argument('--calc_dist_vs', type=int, default=-1)
+    parser_view_rope.add_argument('-i', type=int, default=-1, help='index of entry in log')
+    parser_view_rope.add_argument('--cloud_only', action='store_true', help='don\'t try to fit rope')
     parser_view_rope.set_defaults(func=view_rope)
 
     parser_extract_data = subparsers.add_parser('extract_data')

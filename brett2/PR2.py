@@ -198,10 +198,12 @@ class TrajectoryControllerWrapper(object):
 
         self.controller_pub = rospy.Publisher("%s/command"%controller_name, tm.JointTrajectory)        
 
-        all_vel_limits = self.pr2.robot.GetDOFVelocityLimits()
-        self.vel_limits = np.array([all_vel_limits[i_rave]*VEL_RATIO for i_rave in self.rave_joint_inds])
-        all_acc_limits = self.pr2.robot.GetDOFVelocityLimits()
-        self.acc_limits = np.array([all_acc_limits[i_rave]*ACC_RATIO for i_rave in self.rave_joint_inds])
+        all_vel_limits = np.asarray(self.pr2.robot.GetDOFVelocityLimits())
+        self.vel_limits = all_vel_limits[self.rave_joint_inds] * VEL_RATIO;
+        #self.vel_limits = np.array([all_vel_limits[i_rave]*VEL_RATIO for i_rave in self.rave_joint_inds])
+        all_acc_limits = np.asarray(self.pr2.robot.GetDOFVelocityLimits())
+        self.acc_limits = all_acc_limits[self.rave_joint_inds] * ACC_RATIO
+        #self.acc_limits = np.array([all_acc_limits[i_rave]*ACC_RATIO for i_rave in self.rave_joint_inds])
 
     def get_joint_positions(self):
         msg = self.pr2.get_last_joint_message()

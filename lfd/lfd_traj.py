@@ -235,6 +235,7 @@ def make_joint_traj_by_graph_search(xyzs, quats, manip, targ_frame, downsample=1
 
     def ikfunc(hmat):
         return manip.FindIKSolutions(hmat.dot(Tf_link_ee), 2+16 + (1 if check_collisions else 0))
+        #return manip.FindIKSolutions(hmat.dot(Tf_link_ee), 2+16)
 
     def nodecost(joints):
         robot = manip.GetRobot()
@@ -271,9 +272,7 @@ def compute_feas_inds(xyzs, quats, manip, targ_frame, check_collisions=False):
     def ikfunc(hmat):
         return manip.FindIKSolutions(hmat.dot(Tf_link_ee), 2+16 + (1 if check_collisions else 0))
 
-    feas_inds = traj_ik_graph_search.compute_feas_inds(hmats, ikfunc)
-    rospy.loginfo("%s: %i of %i points feasible", manip.GetName(), len(feas_inds), len(hmats))
-    return feas_inds
+    return traj_ik_graph_search.compute_feas_inds(hmats, ikfunc)
 
 
 def make_joint_traj(xyzs, quats, joint_seeds,manip, ref_frame, targ_frame,filter_options):
@@ -321,7 +320,7 @@ def fill_stationary(traj, times, n_steps):
     if not times: return traj
     return np.insert(traj, np.repeat(times, n_steps), np.repeat(traj[times], n_steps, axis=0), axis=0)
 
-def smooth_disconts(arm_traj, env, manip, link_name, n_steps=8, discont_gap_thresh=0.5):
+def smooth_disconts(arm_traj, env, manip, link_name, n_steps=8, discont_gap_thresh=0.5, ignore_inds=None):
     '''
     Finds and smooths discontinuities by adding n_steps intermediate steps and optimizing those with trajopt.
     Returns: the new trajectory, discontinuity times, and n_steps
@@ -337,6 +336,7 @@ def smooth_disconts(arm_traj, env, manip, link_name, n_steps=8, discont_gap_thre
     discont_times = []
     for i in range(len(arm_traj)):
         if i == 0: continue
+        if ignore_inds is not None and i in ignore_inds: continue
         maxgap = abs(arm_traj[i,:] - arm_traj[i-1,:]).max()
         if maxgap > discont_gap_thresh:
             rospy.loginfo('Discontinuity detected in %s from %d to %d (max gap = %f)', manip.GetName(), i-1, i, maxgap)

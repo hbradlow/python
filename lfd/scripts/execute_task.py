@@ -289,23 +289,21 @@ class SelectTrajectory(smach.State):
         if args.count_steps: candidate_demo_names = self.count2segnames[Globals.stage]
         else: candidate_demo_names = demos.keys()
 
-        from joblib import parallel
-
-        costs_names = parallel.Parallel(n_jobs=-2)(parallel.delayed(calc_seg_cost)(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names)
-        #costs_names = [calc_seg_cost(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names]
-        #costs_names = [calc_seg_cost(seg_name) for seg_name in candidate_demo_names]
-
-        ELOG.log('SelectTrajectory', 'costs_names', costs_names)
-        _, best_name = min(costs_names)
-
         global last_selected_segment
         print 'Last selected segment:', last_selected_segment
+
         if args.human_select_demo:
-            print 'Calculated best demo:', best_name
             best_name = None
             while best_name not in demos:
                 print 'Select demo from', demos.keys()
                 best_name = raw_input('> ')
+        else:
+            from joblib import parallel
+            costs_names = parallel.Parallel(n_jobs=-2)(parallel.delayed(calc_seg_cost)(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names)
+            #costs_names = [calc_seg_cost(seg_name, xyz_new_ds, dists_new) for seg_name in candidate_demo_names]
+            #costs_names = [calc_seg_cost(seg_name) for seg_name in candidate_demo_names]
+            ELOG.log('SelectTrajectory', 'costs_names', costs_names)
+            _, best_name = min(costs_names)
 
         ELOG.log('SelectTrajectory', 'best_name', best_name)
         best_demo = demos[best_name]
@@ -415,14 +413,7 @@ class SelectTrajectory(smach.State):
             OFFSET = 0.1
             XYZ_OFFSETS = np.array([[0., 0., 0.], [-OFFSET, 0, 0], [OFFSET, 0, 0], [0, -OFFSET, 0], [0, OFFSET, 0]])
 
-            # demo_len = 0
-            # for lr in "lr":
-            #     if "%s_gripper_tool_frame"%lr in warped_demo:
-            #         demo_len = len(warped_demo["%s_gripper_tool_frame"%lr]["position"])
-            #         break
-            #inds_to_check = np.arange(0, demo_len, demo_len/40) # only check a few of the trajectory points
             inds_to_check = lfd_traj.where_near_rope(best_demo, xyz_demo_ds, add_other_points=30)
-            print 'checking inds', inds_to_check
 
             need_to_move_base = False
             best_feas_inds, best_xyz_offset = -1, None
@@ -458,24 +449,6 @@ class SelectTrajectory(smach.State):
                 trajectory["%s_grab"%lr] = best_demo["%s_gripper_joint"%lr] < .07
                 trajectory["%s_gripper"%lr] = warped_demo["%s_gripper_joint"%lr]
                 trajectory["%s_gripper"%lr][trajectory["%s_grab"%lr]] = 0
-        # for lr in "lr":
-        #     leftright = {"l":"left","r":"right"}[lr]
-        #     if best_demo["arms_used"] in [lr, "b"]:
-        #         if args.hard_table:
-        #             clipinplace(warped_demo["l_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
-        #             clipinplace(warped_demo["r_gripper_tool_frame"]["position"][:,2],Globals.table_height+.032,np.inf)
-        #         arm_traj, feas_inds = lfd_traj.make_joint_traj_by_graph_search(
-        #             warped_demo["%s_gripper_tool_frame"%lr]["position"],
-        #             warped_demo["%s_gripper_tool_frame"%lr]["orientation"],
-        #             Globals.pr2.robot.GetManipulator("%sarm"%leftright),
-        #             "%s_gripper_tool_frame"%lr,
-        #             check_collisions=True
-        #         )
-        #         if len(feas_inds) == 0: return "failure"
-        #         trajectory["%s_arm"%lr] = arm_traj
-        #         trajectory["%s_grab"%lr] = best_demo["%s_gripper_joint"%lr] < .07
-        #         trajectory["%s_gripper"%lr] = warped_demo["%s_gripper_joint"%lr]
-        #         trajectory["%s_gripper"%lr][trajectory["%s_grab"%lr]] = 0
         # smooth any discontinuities in the arm traj
         for lr in "lr":
             leftright = {"l":"left","r":"right"}[lr]
@@ -484,7 +457,8 @@ class SelectTrajectory(smach.State):
                     trajectory["%s_arm"%lr],
                     Globals.pr2.env,
                     Globals.pr2.robot.GetManipulator("%sarm"%leftright),
-                    "%s_gripper_tool_frame"%lr
+                    "%s_gripper_tool_frame"%lr,
+                    ignore_inds=[1] # ignore the 0--1 discontinuity, which is usually just moving from rest to the traj starting pose
                 )
                 # after smoothing the arm traj, we need to fill in all other trajectories (in both arms)
                 other_lr = 'r' if lr == 'l' else 'l'
@@ -548,13 +522,12 @@ class MoveBase(smach.State):
         ts = np.linspace(0, TIME, STEPS)
 
         pub = rospy.Publisher("base_traj_controller/command", tm.JointTrajectory)
-        #xyacur = np.array(Globals.pr2.base.get_pose("odom_combined"))
         jt = tm.JointTrajectory()
         jt.header.frame_id = "base_footprint"
         for i in xrange(len(xyas)):
             jtp = tm.JointTrajectoryPoint()
             jtp.time_from_start = rospy.Duration(ts[i])
-            jtp.positions = xyas[i]#+xyacur
+            jtp.positions = xyas[i]
             jt.points.append(jtp)
         pub.publish(jt)
 
