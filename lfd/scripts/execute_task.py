@@ -372,7 +372,7 @@ class SelectTrajectory(smach.State):
         def make_traj(warped_demo, inds=None, xyz_offset=0, feas_check_only=False):
             traj = {}
             total_feas_inds = 0
-            all_feas = True
+            total_inds = 0
             for lr in "lr":
                 leftright = {"l":"left","r":"right"}[lr]
                 if best_demo["arms_used"] in [lr, "b"]:
@@ -402,9 +402,9 @@ class SelectTrajectory(smach.State):
                         traj["%s_arm"%lr] = arm_traj
                         traj["%s_arm_feas_inds"%lr] = feas_inds
                     total_feas_inds += len(feas_inds)
-                    all_feas = all_feas and len(feas_inds) == len(pos)
+                    total_inds += len(pos)
                     rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(pos))
-            return traj, total_feas_inds, all_feas
+            return traj, total_feas_inds, total_inds
 
         # Check if we need to move the base for reachability
         base_offset = np.array([0, 0, 0])
@@ -418,11 +418,11 @@ class SelectTrajectory(smach.State):
             need_to_move_base = False
             best_feas_inds, best_xyz_offset = -1, None
             for xyz_offset in XYZ_OFFSETS:
-                _, n_feas_inds, all_feas = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset, feas_check_only=True)
+                _, n_feas_inds, n_total_inds = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset, feas_check_only=True)
                 rospy.loginfo('Cloud offset %s has feas inds %d', str(xyz_offset), n_feas_inds)
                 if n_feas_inds > best_feas_inds:
                     best_feas_inds, best_xyz_offset = n_feas_inds, xyz_offset
-                if all_feas: break
+                if n_feas_inds >= 0.99*n_total_inds: break
             if np.linalg.norm(best_xyz_offset) > 0.01:
                 need_to_move_base = True
             base_offset = -best_xyz_offset
@@ -444,7 +444,6 @@ class SelectTrajectory(smach.State):
         for lr in "lr":
             leftright = {"l":"left","r":"right"}[lr]
             if best_demo["arms_used"] in [lr, "b"]:
-                print trajectory["%s_arm_feas_inds"%lr]
                 if len(trajectory["%s_arm_feas_inds"%lr]) == 0: return "failure"
                 trajectory["%s_grab"%lr] = best_demo["%s_gripper_joint"%lr] < .07
                 trajectory["%s_gripper"%lr] = warped_demo["%s_gripper_joint"%lr]

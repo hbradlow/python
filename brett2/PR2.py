@@ -26,6 +26,11 @@ import move_base_msgs.msg as mbm
 VEL_RATIO = .2
 ACC_RATIO = .3
 
+FAST_VEL_RATIO = .9
+FAST_ACC_RATIO = .9
+FAST_ARM_JOINTS = [4, 5, 6]
+
+
 class IKFail(Exception):
     pass
 
@@ -198,12 +203,23 @@ class TrajectoryControllerWrapper(object):
 
         self.controller_pub = rospy.Publisher("%s/command"%controller_name, tm.JointTrajectory)        
 
+        fast_joints = set(self.pr2.robot.GetManipulator("leftarm").GetArmIndices()[FAST_ARM_JOINTS]).union(set(self.pr2.robot.GetManipulator("rightarm").GetArmIndices()[FAST_ARM_JOINTS]))
+        print 'fast joints', fast_joints
+
         all_vel_limits = np.asarray(self.pr2.robot.GetDOFVelocityLimits())
-        self.vel_limits = all_vel_limits[self.rave_joint_inds] * VEL_RATIO;
-        #self.vel_limits = np.array([all_vel_limits[i_rave]*VEL_RATIO for i_rave in self.rave_joint_inds])
-        all_acc_limits = np.asarray(self.pr2.robot.GetDOFVelocityLimits())
-        self.acc_limits = all_acc_limits[self.rave_joint_inds] * ACC_RATIO
-        #self.acc_limits = np.array([all_acc_limits[i_rave]*ACC_RATIO for i_rave in self.rave_joint_inds])
+        self.vel_limits = [ all_vel_limits[i] * (VEL_RATIO if i not in fast_joints else FAST_VEL_RATIO) for i in self.rave_joint_inds ]
+        print 'vel lims', self.vel_limits
+        all_acc_limits = np.asarray(self.pr2.robot.GetDOFAccelerationLimits())
+        self.acc_limits = [ all_acc_limits[i] * (VEL_RATIO if i not in fast_joints else FAST_VEL_RATIO) for i in self.rave_joint_inds ]
+        print 'acc lims', self.acc_limits
+        #self.acc_limits = all_acc_limits[self.rave_joint_inds] * ACC_RATIO
+
+#       left_fast_joints = self.pr2.robot.GetManipulator("leftarm").GetArmIndices()[FAST_ARM_JOINTS]
+#       self.vel_limits[left_fast_joints] = all_vel_limits[left_fast_joints] * FAST_VEL_RATIO
+#       self.acc_limits[left_fast_joints] = all_acc_limits[left_fast_joints] * FAST_ACC_RATIO
+#       right_fast_joints = self.pr2.robot.GetManipulator("rightarm").GetArmIndices()[FAST_ARM_JOINTS]
+#       self.vel_limits[right_fast_joints] = all_vel_limits[right_fast_joints] * FAST_VEL_RATIO
+#       self.acc_limits[right_fast_joints] = all_acc_limits[right_fast_joints] * FAST_ACC_RATIO
 
     def get_joint_positions(self):
         msg = self.pr2.get_last_joint_message()

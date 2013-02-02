@@ -1,5 +1,6 @@
 from __future__ import division
 
+import random
 
 def create_box_from_bounds(env, bounds, name="box"):
   xmin, xmax, ymin, ymax, zmin, zmax = bounds
@@ -20,7 +21,7 @@ def create_box_from_bounds(env, bounds, name="box"):
       (xmax-xmin)/2, (ymax-ymin)/2, (zmax-zmin)/2 )
   
   
-  fname = "/tmp/%s.xml"%name
+  fname = "/tmp/%s-%d.xml"%(name, random.randint(0, 9999999999))
   with open(fname,"w") as fh:
     fh.write(xml_str)
       
@@ -46,7 +47,7 @@ def create_cylinder(env, center, radius, height, name = "cylinder"):
       xcenter, ycenter, zcenter,
       radius, height )
   
-  fname = "/tmp/%s.xml"%name
+  fname = "/tmp/%s-%d.xml"%(name, random.randint(0, 9999999999))
   with open(fname,"w") as fh:
     fh.write(xml_str)
       

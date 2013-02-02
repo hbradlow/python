@@ -258,7 +258,7 @@ class Globals:
             import time
             time.sleep(.2)
     
-def tps_rpm(x_nd, y_md, n_iter = 5, reg_init = .1, reg_final = .001, rad_init = .2, rad_final = .001, plotting = False, verbose=True, f_init = None, return_full = False, ns_prefix='tpsrpm', p=.2, interactive=False):
+def tps_rpm(x_nd, y_md, n_iter = 5, reg_init = .1, reg_final = .001, rad_init = .2, rad_final = .001, plotting = False, verbose=True, f_init = None, return_full = False, ns_prefix='tpsrpm', p=.2, interactive=False, show_corr=False):
     """
     tps-rpm algorithm mostly as described by chui and rangaran
     reg_init/reg_final: regularization on curvature
@@ -304,7 +304,7 @@ def tps_rpm(x_nd, y_md, n_iter = 5, reg_init = .1, reg_final = .001, rad_init = 
             targ_pose_array = conversions.array_to_pose_array(targ_Nd, 'base_footprint')
             Globals.handles.append(Globals.rviz.draw_curve(targ_pose_array,rgba=(1,1,0,1),type=Marker.CUBE_LIST, ns=ns_prefix+'_targ_Nd'))
 
-    if plotting:
+    if show_corr:
         plot_correspondence_3d(x_nd[goodn], targ_Nd)
 
     if return_full:

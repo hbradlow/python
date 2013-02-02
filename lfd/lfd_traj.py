@@ -44,25 +44,40 @@ def follow_trajectory_with_grabs(pr2, bodypart2traj, ignore_failure=False):
     T = len(bodypart2traj.values()[0])
     l_grab = bodypart2traj["l_grab"] if "l_grab" in bodypart2traj else np.zeros(T,bool)
     r_grab = bodypart2traj["r_grab"] if "r_grab" in bodypart2traj else np.zeros(T,bool)
+
     l_after_grab_inds = np.flatnonzero(l_grab[1:] > l_grab[:-1])+1
     r_after_grab_inds = np.flatnonzero(r_grab[1:] > r_grab[:-1])+1
-    inds_sides = sorted([(i,'l') for i in l_after_grab_inds] + [(i,'r') for i in r_after_grab_inds])
-    inds_sides = merge_nearby_grabs(inds_sides)
-    
+    grab_inds_sides = sorted([(i,'l') for i in l_after_grab_inds] + [(i,'r') for i in r_after_grab_inds])
+    grab_inds_sides = merge_nearby_grabs(grab_inds_sides)
+
+    l_after_release_inds = np.flatnonzero(l_grab[1:] < l_grab[:-1])+1
+    r_after_release_inds = np.flatnonzero(r_grab[1:] < r_grab[:-1])+1
+    release_inds_sides = sorted([(i,'l') for i in l_after_release_inds] + [(i,'r') for i in r_after_release_inds])
+    release_inds_sides = merge_nearby_grabs(release_inds_sides)
+
+    inds_sides = sorted([(x, 'grab') for x in grab_inds_sides] + [(x, 'release') for x in release_inds_sides])
+
     num_grabs = len(inds_sides)
     print "breaking trajectory into %i segments"%(num_grabs+1)
     go_to_start(pr2, bodypart2traj)
     i_begin = 0
-    for (i_grab, side) in inds_sides:
+    for ((i_grab, side), action) in inds_sides:
         t_start = rospy.Time.now().to_sec()
         success = follow_trajectory(pr2, slice_traj(bodypart2traj, i_begin, i_grab))
         rospy.loginfo("follow traj result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
         if not success and not ignore_failure: return False
+
         t_start = rospy.Time.now().to_sec()
-        success = close_gripper(pr2, side)
-        rospy.loginfo("close gripper result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)        
-        if not success and not ignore_failure: return False        
+        if action == 'grab':
+            success = close_gripper(pr2, side)
+            rospy.loginfo("close gripper result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
+        elif action == 'release':
+            print 'gripper angles in neighborhood:', bodypart2traj['%s_gripper'%side][i_grab-5:i_grab+5]
+            success = set_gripper_angle(pr2, side, bodypart2traj['%s_gripper'%side][i_grab])
+            rospy.loginfo("open gripper result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
+        if not success and not ignore_failure: return False
         i_begin = i_grab
+
     t_start = rospy.Time.now().to_sec()
     success = follow_trajectory(pr2, slice_traj(bodypart2traj, i_begin, -1))
     rospy.loginfo("follow traj result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
@@ -85,7 +100,7 @@ def where_near_rope(demo, xyz, thresh=.04, add_other_points=-1):
         traj_len = len(pos)
         dist_to_rope = ssd.cdist(pos, xyz).min(axis=1)
         close_inds = np.nonzero(dist_to_rope < thresh)[0]
-        slice_step = len(close_inds)/100 or 1
+        slice_step = len(close_inds)/50 or 1
         near_rope = np.union1d(near_rope, close_inds[::slice_step])
     if add_other_points > 0:
         near_rope = np.union1d(near_rope, np.arange(0, traj_len, traj_len/add_other_points))
@@ -174,6 +189,16 @@ def follow_trajectory(pr2, bodypart2traj):
     pr2.join_all()    
     return True
     
+def set_gripper_angle(pr2, side, angle):
+    raw_input('begin set gripper angle to ' + str(angle))
+    grippers = {'l':[pr2.lgrip], 'r':[pr2.rgrip], 'b':[pr2.lgrip, pr2.rgrip]}[side]
+    for gripper in grippers:
+        gripper.set_angle(angle)
+    pr2.join_all()
+    rospy.sleep(.15)
+    raw_input('end set gripper angle')
+    return True
+
 def close_gripper(pr2, side):
     """
     return True if it's grabbing an object
@@ -248,8 +273,8 @@ def make_joint_traj_by_graph_search(xyzs, quats, manip, targ_frame, downsample=1
     start_joints = manip.GetRobot().GetDOFValues(manip.GetArmIndices())
     paths, costs, timesteps = traj_ik_graph_search.traj_cart2joint(
         ds_hmats, ikfunc,
-        start_joints=start_joints,
-        nodecost=nodecost if check_collisions else None
+        start_joints=start_joints
+        #nodecost=nodecost if check_collisions else None
     )
     rospy.loginfo("%s: %i of %i points feasible", manip.GetName(), len(timesteps), ds_len)
 
