@@ -53,9 +53,84 @@ def draw_grid(rviz, f, mins, maxes, frame_id, xres = .1, yres = .1, zres = .04, 
             lines.append(f(xyz))
 
     for line in lines:
-        grid_handles.append(rviz.draw_curve(conversions.array_to_pose_array(line, frame_id),width=.0005,rgba=(1,1,0,1), ns=ns))
+        grid_handles.append(rviz.draw_curve(conversions.array_to_pose_array(line, frame_id),width=.002,rgba=(1,1,0,1), ns=ns))
                                 
     return grid_handles
+
+def draw_grid_pyplot(plt, f, mins, maxes, xres=.1, yres=.1, zres=.03):
+    xmin, ymin, zmin = mins
+    xmax, ymax, zmax = maxes
+
+    nfine = 30
+    xcoarse = np.arange(xmin, xmax, xres)
+    ycoarse = np.arange(ymin, ymax, yres)
+    if zres is None or zres == -1: zcoarse = [(zmin+zmax)/2.]
+    else: zcoarse = np.arange(zmin, zmax, zres)
+    xfine = np.linspace(xmin, xmax, nfine)
+    yfine = np.linspace(ymin, ymax, nfine)
+    zfine = np.linspace(zmin, zmax, nfine)
+
+    lines = []
+    if zres is not None and len(zcoarse) > 1:
+        for x in xcoarse:
+            for y in ycoarse:
+                xyz = np.zeros((nfine, 3))
+                xyz[:,0] = x
+                xyz[:,1] = y
+                xyz[:,2] = zfine
+                lines.append(f(xyz))
+    for y in ycoarse:
+        for z in zcoarse:
+            xyz = np.zeros((nfine, 3))
+            xyz[:,0] = xfine
+            xyz[:,1] = y
+            xyz[:,2] = z
+            lines.append(f(xyz))
+    for z in zcoarse:
+        for x in xcoarse:
+            xyz = np.zeros((nfine, 3))
+            xyz[:,0] = x
+            xyz[:,1] = yfine
+            xyz[:,2] = z
+            lines.append(f(xyz))
+
+    for line in lines:
+        for a, b in zip(line[:-1], line[1:]):
+            plt.arrow(a[0], a[1], b[0]-a[0], b[1]-a[1], linewidth=.02, head_width=0, color=(.2, .2, .2))
+
+# def draw_grid_pyplot(f, mins, maxes, grid_res=.1, flipax=True):
+#     import matplotlib
+#     import matplotlib.pyplot as plt
+
+#     xmin, ymin = mins
+#     xmax, ymax = maxes
+#     nfine = 30
+#     xcoarse = np.arange(xmin, xmax, grid_res)
+#     ycoarse = np.arange(ymin, ymax, grid_res)
+#     xfine = np.linspace(xmin, xmax, nfine)
+#     yfine = np.linspace(ymin, ymax, nfine)
+    
+#     lines = []
+    
+#     sgn = -1 if flipax else 1
+
+#     xyz = np.zeros((nfine, 3))
+#     for x in xcoarse:
+#         xyz[:,0] = x
+#         xyz[:,1] = yfine
+#         #lines.append(f(xyz)[:,:2:sgn])
+#         lines.append(f(xyz)[:,:2])
+
+#     for y in ycoarse:
+#         xyz[:,0] = xfine
+#         xyz[:,1] = y
+#         #lines.append(f(xyz)[:,:2:sgn])
+#         lines.append(f(xyz)[:,:2])
+
+#     lc = matplotlib.collections.LineCollection(lines,colors='gray',lw=2)
+#     ax = plt.gca()
+#     ax.add_collection(lc)
+#     plt.draw()
 
 
 def interp_between(xnew, x0, x1, y0, y1):
