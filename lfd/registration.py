@@ -302,7 +302,7 @@ def tps_rpm(x_nd, y_md, n_iter = 5, reg_init = .1, reg_final = .001, rad_init = 
         if plotting and i%plotting==0:
             plot_orig_and_warped_clouds(f.transform_points, x_nd, y_md, ns_prefix=ns_prefix)
             targ_pose_array = conversions.array_to_pose_array(targ_Nd, 'base_footprint')
-            Globals.handles.append(Globals.rviz.draw_curve(targ_pose_array,rgba=(1,1,0,1),type=Marker.CUBE_LIST, ns=ns_prefix+'_targ_Nd'))
+            #Globals.handles.append(Globals.rviz.draw_curve(targ_pose_array,rgba=(1,1,0,1),type=Marker.CUBE_LIST, ns=ns_prefix+'_targ_Nd'))
 
     if show_corr:
         plot_correspondence_3d(x_nd[goodn], targ_Nd)
@@ -405,35 +405,40 @@ class FuncPlotter(object):
         plt.clf()
         plt.plot(self.xs, self.ys,'x')
         plt.draw()
- 
-def plot_orig_and_warped_clouds(f, x_nd, y_md, res=.1, d=3, ns_prefix='tpsrpm'):
+
+def plot_orig_and_warped_clouds(f, x_nd, y_md, res=.05, d=3, ns_prefix='tpsrpm', force_pyplot=False, ax=None):
+    if ax is None: ax = plt
     if d==2:
-        import matplotlib.pyplot as plt
-        plt.plot(x_nd[:,1], x_nd[:,0],'r.')
-        plt.plot(y_md[:,1], y_md[:,0], 'b.')
-    pred = f(x_nd)
-    if d==2:
-        plt.plot(pred[:,1], pred[:,0], 'g.')
-    if d == 2:
+        ax.plot(x_nd[:,1], x_nd[:,0],'r.')
+        ax.plot(y_md[:,1], y_md[:,0], 'b.')
+        pred = f(x_nd)
+        ax.plot(pred[:,1], pred[:,0], 'g.')
         plot_warped_grid_2d(f, x_nd.min(axis=0), x_nd.max(axis=0))
-        plt.ginput()
+        ax.ginput()
     elif d == 3:
-        
-        Globals.setup()
+        if force_pyplot:
+            mins = np.r_[x_nd, y_md].min(axis=0) - np.array([.5, .5, .01])
+            maxes = np.r_[x_nd, y_md].max(axis=0) + np.array([.5, .5, .01])
+            #warping.draw_grid_pyplot(f, mins[:2], maxes[:2], grid_res=res)
+            warping.draw_grid_pyplot(ax, f, mins, maxes, xres=res, yres=res, zres=None)
+            ax.scatter(x_nd[:,0], x_nd[:,1], color=(1, 0, 0), label='demo')
+            ax.scatter(y_md[:,0], y_md[:,1], color=(0, 0, 1), label='test')
+            fx_nd = f(x_nd)
+            ax.scatter(fx_nd[:,0], fx_nd[:,1], color='brown', alpha=.5, label='warped demo')
+        else:
+            Globals.setup()
+            mins = x_nd.min(axis=0)
+            maxes = x_nd.max(axis=0)
+            mins -= np.array([.1, .1, .01])
+            maxes += np.array([.1, .1, .01])
+            Globals.handles = warping.draw_grid(Globals.rviz, f, mins, maxes, 'base_footprint', xres=res, yres=res, zres=-1, ns=ns_prefix+'_grid')
+            orig_pose_array = conversions.array_to_pose_array(x_nd, "base_footprint")
+            target_pose_array = conversions.array_to_pose_array(y_md, "base_footprint")
+            warped_pose_array = conversions.array_to_pose_array(f(x_nd), 'base_footprint')
+            Globals.handles.append(Globals.rviz.draw_curve(orig_pose_array,rgba=(1,0,0,.9),type=Marker.CUBE_LIST, ns=ns_prefix+'_demo_cloud'))
+            Globals.handles.append(Globals.rviz.draw_curve(target_pose_array,rgba=(0,0,1,.9),type=Marker.CUBE_LIST, ns=ns_prefix+'_target_cloud'))
+            Globals.handles.append(Globals.rviz.draw_curve(warped_pose_array,rgba=(0,1,0,.9),type=Marker.CUBE_LIST, ns=ns_prefix+'_warped_cloud'))
 
-        mins = x_nd.min(axis=0)
-        maxes = x_nd.max(axis=0)
-        mins -= np.array([.1, .1, .01])
-        maxes += np.array([.1, .1, .01])
-        Globals.handles = warping.draw_grid(Globals.rviz, f, mins, maxes, 'base_footprint', xres=res, yres=res, zres=-1, ns=ns_prefix+'_grid')
-        orig_pose_array = conversions.array_to_pose_array(x_nd, "base_footprint")
-        target_pose_array = conversions.array_to_pose_array(y_md, "base_footprint")
-        warped_pose_array = conversions.array_to_pose_array(f(x_nd), 'base_footprint')
-        Globals.handles.append(Globals.rviz.draw_curve(orig_pose_array,rgba=(1,0,0,.4),type=Marker.CUBE_LIST, ns=ns_prefix+'_demo_cloud'))
-        Globals.handles.append(Globals.rviz.draw_curve(target_pose_array,rgba=(0,0,1,.4),type=Marker.CUBE_LIST, ns=ns_prefix+'_target_cloud'))
-        Globals.handles.append(Globals.rviz.draw_curve(warped_pose_array,rgba=(0,1,0,.4),type=Marker.CUBE_LIST, ns=ns_prefix+'_warped_cloud'))
-
-        
 def find_targets(x_md, y_nd, corr_opts):
     """finds correspondence matrix, and then for each point in source cloud,
     find the weighted average of its "partners" in the target cloud"""
