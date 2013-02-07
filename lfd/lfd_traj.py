@@ -72,8 +72,11 @@ def follow_trajectory_with_grabs(pr2, bodypart2traj, ignore_failure=False):
             success = close_gripper(pr2, side)
             rospy.loginfo("close gripper result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
         elif action == 'release':
-            print 'gripper angles in neighborhood:', bodypart2traj['%s_gripper'%side][i_grab-5:i_grab+5]
-            success = set_gripper_angle(pr2, side, bodypart2traj['%s_gripper'%side][i_grab])
+            if side == 'b':
+                angles = {'l': bodypart2traj['l_gripper'][i_grab], 'r': bodypart2traj['r_gripper'][i_grab]}
+            else:
+                angles = {side: bodypart2traj['%s_gripper'%side][i_grab]}
+            success = set_gripper_angle(pr2, side, angles)
             rospy.loginfo("open gripper result: %s, duration: %.2f", success, rospy.Time.now().to_sec() - t_start)
         if not success and not ignore_failure: return False
         i_begin = i_grab
@@ -189,14 +192,12 @@ def follow_trajectory(pr2, bodypart2traj):
     pr2.join_all()    
     return True
     
-def set_gripper_angle(pr2, side, angle):
-    raw_input('begin set gripper angle to ' + str(angle))
+def set_gripper_angle(pr2, side, angles):
     grippers = {'l':[pr2.lgrip], 'r':[pr2.rgrip], 'b':[pr2.lgrip, pr2.rgrip]}[side]
     for gripper in grippers:
-        gripper.set_angle(angle)
+        gripper.set_angle(angles[gripper.lr])
     pr2.join_all()
     rospy.sleep(.15)
-    raw_input('end set gripper angle')
     return True
 
 def close_gripper(pr2, side):
