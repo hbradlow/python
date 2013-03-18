@@ -4,6 +4,7 @@
 *.wpu
 *.pyc
 *.log
+*.swp
 
 *.so
 *.o

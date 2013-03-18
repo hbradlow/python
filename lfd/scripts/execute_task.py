@@ -23,7 +23,6 @@ parser.add_argument("--log_name", type=str, default="/tmp")
 parser.add_argument("--use_base", action="store_true")
 args = parser.parse_args()
 
-import roslib; roslib.load_manifest("smach_ros")
 import smach
 import lfd
 from lfd import registration, trajectory_library, warping, recognition, lfd_traj
@@ -32,7 +31,6 @@ from jds_utils.yes_or_no import yes_or_no
 import sensor_msgs.msg
 import geometry_msgs.msg as gm
 import trajectory_msgs.msg as tm
-import rospy
 import os
 import os.path as osp
 from brett2 import ros_utils, PR2
@@ -55,6 +53,7 @@ import yaml
 import time, datetime
 import pickle
 import atexit
+import logging
 
 ########## INITIALIZATION ##########
 class ExecLog(object):
@@ -64,13 +63,13 @@ class ExecLog(object):
 
         dirname = osp.join(osp.dirname(lfd.__file__), 'data', 'logs', args.log_name)
         if not osp.exists(dirname):
-            rospy.loginfo('Creating log directory %s', dirname)
+            logging.info('Creating log directory %s', dirname)
             os.makedirs(dirname)
         self.filename = osp.join(
             dirname,
             'execute_task_%d_%s_%s.log' % (os.getpid(), datetime.datetime.now().isoformat(), self.name)
         )
-        rospy.loginfo('Will write event log to %s', self.filename)
+        logging.info('Will write event log to %s', self.filename)
 
     def log(self, state, msg, data):
         pickle.dumps(data) # just make sure that the data is pickle-able
@@ -86,7 +85,7 @@ class ExecLog(object):
             return
         with open(self.filename, 'w') as f:
             pickle.dump(self.events, f, protocol=2)
-        rospy.loginfo('Wrote %d events to %s', len(self.events), self.filename)
+        logging.info('Wrote %d events to %s', len(self.events), self.filename)
         self.events = []
 
 ELOG = ExecLog()
@@ -107,7 +106,7 @@ if args.task.startswith("fold"):
 
 H5FILE = osp.join(data_dir, task_info[args.task]["db_file"])
 demos_file = h5py.File(H5FILE,"r")
-rospy.loginfo("loading demos into memory")
+logging.info("loading demos into memory")
 demos = warping.group_to_dict(demos_file)
 
 last_selected_segment = ''
@@ -126,6 +125,7 @@ def draw_table():
     Globals.handles.append(Globals.rviz.draw_marker(ps, type=Marker.CUBE, scale = aabb.extents()*2, id = 24019,rgba = (1,0,0,.25)))
 
 def load_table():
+    #TODO
     table_bounds = map(float, rospy.get_param("table_bounds").split())
     kinbodies.create_box_from_bounds(Globals.pr2.env,table_bounds, name="table")
 
@@ -180,6 +180,7 @@ class Globals:
     rviz = None
     handles = []
     isinstance(pr2, PR2.PR2)
+    #TODO
     isinstance(rviz, ros_utils.RvizWrapper)
     if args.count_steps: stage = 0
 
@@ -190,6 +191,7 @@ class Globals:
         if Globals.pr2 is None:
             Globals.pr2 = PR2.PR2.create(rave_only=args.test)
             if not args.test: load_table()
+        #TODO
         if Globals.rviz is None: Globals.rviz = ros_utils.RvizWrapper.create()
         Globals.table_height = rospy.get_param("table_height")
 
@@ -230,15 +232,17 @@ class LookAtObject(smach.State):
         Globals.pr2.join_all()
 
         if args.delay_before_look > 0:
-            rospy.loginfo('sleeping for %f secs before looking', args.delay_before_look)
-            rospy.sleep(args.delay_before_look)
+            logging.info('sleeping for %f secs before looking', args.delay_before_look)
+            time.sleep(args.delay_before_lock)
 
         if args.test:
             xyz = np.squeeze(np.asarray(demos[select_from_list(demos.keys())]["cloud_xyz"]))
         elif args.use_tracking:
+            #TODO
             msg = rospy.wait_for_message("/tracker/object", TrackedObject)
             xyz = [(pt.x, pt.y, pt.z) for pt in msg.rope.nodes]
         else:
+            #TODO
             msg = rospy.wait_for_message(args.cloud_topic, sensor_msgs.msg.PointCloud2)
             xyz, rgb = ros_utils.pc2xyzrgb(msg)
             xyz = xyz.reshape(-1,3)
@@ -257,7 +261,7 @@ class SelectTrajectory(smach.State):
             input_keys = ["points"],
             output_keys = ["trajectory", "base_offset"])
 
-        rospy.loginfo("preprocessing demo point clouds...")
+        logging.info("preprocessing demo point clouds...")
         for (_,demo) in demos.items():
             demo["cloud_xyz_ds"], ds_inds = downsample(demo["cloud_xyz"])
             demo["cloud_xyz"] = np.squeeze(demo["cloud_xyz"])
@@ -268,7 +272,7 @@ class SelectTrajectory(smach.State):
             for (name, demo) in demos.items():
                 self.count2segnames[int(demo["seg_index"])].append(name)
 
-        rospy.loginfo("done")
+        logging.info("done")
 
     def execute(self,userdata):
         """
@@ -308,11 +312,11 @@ class SelectTrajectory(smach.State):
         ELOG.log('SelectTrajectory', 'best_name', best_name)
         best_demo = demos[best_name]
         if best_demo["done"]:
-            rospy.loginfo("best demo was a 'done' state")
+            logging.info("best demo was a 'done' state")
             return "done"
 
         best_demo = demos[best_name]
-        rospy.loginfo("best segment name: %s", best_name)
+        logging.info("best segment name: %s", best_name)
         last_selected_segment = best_name
         xyz_demo_ds = best_demo["cloud_xyz_ds"]
         ELOG.log('SelectTrajectory', 'xyz_demo_ds', xyz_demo_ds)
@@ -328,7 +332,7 @@ class SelectTrajectory(smach.State):
             ELOG.log('SelectTrajectory', 'f', self.f)
             ELOG.log('SelectTrajectory', 'f_info', info)
             if args.use_nr:
-                rospy.loginfo('Using nonrigidity costs')
+                logging.info('Using nonrigidity costs')
                 from lfd import tps
                 import scipy.spatial.distance as ssd
                 pts_grip = []
@@ -403,7 +407,7 @@ class SelectTrajectory(smach.State):
                         traj["%s_arm_feas_inds"%lr] = feas_inds
                     total_feas_inds += len(feas_inds)
                     total_inds += len(pos)
-                    rospy.loginfo("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(pos))
+                    logging.info("%s arm: %i of %i points feasible", leftright, len(feas_inds), len(pos))
             return traj, total_feas_inds, total_inds
 
         # Check if we need to move the base for reachability
@@ -419,22 +423,22 @@ class SelectTrajectory(smach.State):
             best_feas_inds, best_xyz_offset = -1, None
             for xyz_offset in XYZ_OFFSETS:
                 _, n_feas_inds, n_total_inds = make_traj(warped_demo, inds=inds_to_check, xyz_offset=xyz_offset, feas_check_only=True)
-                rospy.loginfo('Cloud offset %s has feas inds %d', str(xyz_offset), n_feas_inds)
+                logging.info('Cloud offset %s has feas inds %d', str(xyz_offset), n_feas_inds)
                 if n_feas_inds > best_feas_inds:
                     best_feas_inds, best_xyz_offset = n_feas_inds, xyz_offset
                 if n_feas_inds >= 0.99*n_total_inds: break
             if np.linalg.norm(best_xyz_offset) > 0.01:
                 need_to_move_base = True
             base_offset = -best_xyz_offset
-            rospy.loginfo('Best base offset: %s, with %d feas inds', str(base_offset), best_feas_inds)
+            logging.info('Best base offset: %s, with %d feas inds', str(base_offset), best_feas_inds)
 
             # Move the base
             if need_to_move_base:
-                rospy.loginfo('Will move base.')
+                logging.info('Will move base.')
                 userdata.base_offset = base_offset
                 return 'move_base'
             else:
-                rospy.loginfo('Will not move base.')
+                logging.info('Will not move base.')
 
         Globals.pr2.update_rave()
 
@@ -517,9 +521,10 @@ class MoveBase(smach.State):
 
         STEPS = 10; TIME = 5.
         xyas = mu.interp2d(np.linspace(0, 1, STEPS), [0, 1], [[0, 0, 0], base_offset])
-        rospy.loginfo('Following base trajectory %s', str(xyas))
+        logging.info('Following base trajectory %s', str(xyas))
         ts = np.linspace(0, TIME, STEPS)
 
+        #TODO
         pub = rospy.Publisher("base_traj_controller/command", tm.JointTrajectory)
         jt = tm.JointTrajectory()
         jt.header.frame_id = "base_footprint"
@@ -530,7 +535,7 @@ class MoveBase(smach.State):
             jt.points.append(jtp)
         pub.publish(jt)
 
-        rospy.sleep(TIME*2)
+        time.sleep(TIME*2)
         ELOG.log('MoveBase', 'base_offset', base_offset)
         return 'success'
 
@@ -577,6 +582,7 @@ def make_tie_knot_sm():
 
 if __name__ == "__main__":
     Globals.handles = []
+    #TODO
     if rospy.get_name() == '/unnamed':
         rospy.init_node("tie_knot", disable_signals=True)
     Globals.setup()
